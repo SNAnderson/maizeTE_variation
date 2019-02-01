@@ -1,5 +1,5 @@
 Processed data files for TE variation manuscript 
-Compiled by Sarah Anderson (permanent email: asarahanderson@gmail.com)
+Compiled by Sarah Anderson
 ____________________________________________
 
 FilteredTE annotations
