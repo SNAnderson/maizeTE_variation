@@ -85,9 +85,13 @@ A non-redundant TE set was created for all elements that could be resolved as sh
 ____________________________________________
 
 TE expression across development: 
-Walley_expresslion_18Jan19.txt
+Walley_expression_18Jan19.txt
 
 TE family RPM values for Walley et al. 2016 developmental atlas (B73). 
+Data source:
+Integration of omic networks in a developmental atlas of maize
+Walley JW, Sartor RC, Shen Z, Schmitz RJ, Wu KJ, Urich MA, Nery JR et al.
+Science, 2016
 
 
 
