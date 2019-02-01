@@ -93,10 +93,9 @@ Integration of omic networks in a developmental atlas of maize
 Walley JW, Sartor RC, Shen Z, Schmitz RJ, Wu KJ, Urich MA, Nery JR et al.
 Science, 2016
 
+____________________________________________
 
+IBS coordinates for B73 vs W22, Mo17, PH207
+IBS_coordinates_BtoAll.xlsx
 
-
-
-
-
-
+SNP density for each 1-Mb bin was determined by dividing the total number of SNPs in the window by the number of base pairs in syntenic alignments in the window. Regions with SNP density lower than 0.0005 over at least 5 Mb window were defined as IBS regions. For each comparison between B73 and a contrasting genome (W22, Mo17, or PH207), the inferred coordinates for the outermost shared site defined B73 TEs completely within each IBS block were used to mark the boundary of the IBS region in the contrasting genome. 
