@@ -3,6 +3,8 @@ Additional files related to Anderson et al. 2019
 
 Processed data files for TE variation manuscript 
 Compiled by Sarah Anderson
+
+Unfiltered TE annotation files and further descriptions are available at https://mcstitzer.github.io/maize_TEs
 ____________________________________________
 
 FilteredTE annotations
