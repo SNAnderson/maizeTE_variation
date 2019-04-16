@@ -1,0 +1,49 @@
+import pandas as pd
+import glob
+import itertools
+from os import path
+
+# snakemake -p --dir ~/software/synmap --configfile config/config.yaml --cluster-config cluster.yaml --cluster "qsub -l {cluster.l} -m {cluster.m} -N {cluster.N} -r {cluster.r} -V" -n --jobs 10
+# snakemake -p --dir /panfs/roc/scratch/broha006/projects/RNA_predict --configfile config/config.yaml --cluster-config cluster.yaml --cluster "qsub -l {cluster.l} -m {cluster.m} -N {cluster.N} -r {cluster.r} -V" --jobs 2
+# module load gcc bedtools mummer
+configfile: '/home/hirschc1/broha006/software/synmap/config/config.yaml'
+samples = pd.read_csv('/home/hirschc1/broha006/software/synmap/samples.csv', index_col=False)
+localrules: get_rep_cds, get_bed, blast2raw, dag_format, geneorder_conversion, syntenic_depth, coordinate_conversion, make_key, prepare_ortho, make_blast_db, prepare_blast, add_orthofinder, parse_nucmer, add_nucmer
+
+## FUNCTIONS
+
+def get_samples():
+    '''Returns list of all samples.'''
+    return list(samples["sample"].unique())
+
+def sample_permuations():
+    """Compile all possible runs amongst query and references as defined in samples file"""
+    print(samples)
+    queries = list(samples.loc[samples["reference"] == 0]["sample"])
+    references = list(samples.loc[samples["reference"] == 1]["sample"])
+    runs = list( itertools.product( queries, references ) )
+    # Now to run each reference against every other reference
+    if len(references) > 1:
+        for p in itertools.permutations(references):
+            if p[0] < p[-1]:
+                runs.append(p)
+    # append refernce-to-reference to list
+    runs = [query + "-" + ref for query,ref in runs]
+    return runs
+
+runs = sample_permuations()
+
+## TARGETS
+rule all:
+    input:
+        #["{run}/orthofinder/Blast_{query}_{subj}-orthofinder-groups.txt".format(run=run,query=run.split('-')[0], subj=run.split('-')[1]) for run in runs]
+        ["{run}/{query}-{subj}_key-beta.txt".format(run=run, query=run.split('-')[0], subj=run.split('-')[1]) for run in runs]
+        #["{run}/{query}-{subj}_key-wOrtho.txt".format(run=run, query=run.split('-')[0], subj=run.split('-')[1]) for run in runs],
+        #["{run}/{query}_{subj}-nucmer.coords".format(run=run, query=run.split('-')[0], subj=run.split('-')[1]) for run in runs]
+        #["{run}/{query}-{subj}_key.txt".format(run=run, query=run.split('-')[0], subj=run.split('-')[1]) for run in runs]
+        #["{run}/orthofinder/Blast_{query}_{subj}-orthofinder-groups.txt".format(run=run, query=run.split('-')[0], subj=run.split('-')[1]) for run in runs]
+
+## RULES
+include: "rules/align.smk"
+include: "rules/ortho.smk"
+include: "rules/nucmer.smk"
