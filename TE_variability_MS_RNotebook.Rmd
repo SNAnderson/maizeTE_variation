@@ -1,0 +1,1526 @@
+---
+title: "TE_polymorphism_V2"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Load packages
+```{r}
+library(reshape)
+library(reshape2)
+library(ggplot2)
+library(shiny)
+library(pheatmap)
+library(RColorBrewer)
+library("factoextra")
+library(viridis)
+library(UpSetR)
+library(colorspace)
+library(GeneOverlap)
+library(VennDiagram)
+library(ggridges)
+library(gridExtra)
+library(superheat)
+library(dplyr)
+library(Sushi)
+library(tidyr)
+library(matrixStats)
+library(ggalluvial)
+```
+
+### Organize files
+```{r}
+geno.table <- data.frame(matrix(NA,nrow=4,ncol=2))
+names(geno.table) <- c("genotype","short.geno")
+geno.table$genotype <- c("B73","W22","PH207","Mo17")
+geno.table$short.geno <- c("b","w","ph","m")
+geno.table$run <- c(T,T,T,T)
+geno.table
+
+contrast.table <- data.frame(matrix(NA,nrow=12,ncol=5))
+names(contrast.table) <- c("contrast","geno1","geno2","short.geno1","short.geno2")
+contrast.table$short.geno1 <- rep(geno.table$short.geno,each=3)
+contrast.table$short.geno2 <- geno.table$short.geno[c(2,3,4,1,3,4,1,2,4,1,2,3)]
+contrast.table$contrast <- paste(contrast.table$short.geno1,"to",contrast.table$short.geno2,2,sep="")
+rownames(contrast.table) <- paste(contrast.table$short.geno1,"to",contrast.table$short.geno2,sep="")
+for(i in 1:nrow(contrast.table)){
+  contrast.table[i,"geno1"] <- geno.table$genotype[geno.table$short.geno == contrast.table[i,"short.geno1"]]
+  contrast.table[i,"geno2"] <- geno.table$genotype[geno.table$short.geno == contrast.table[i,"short.geno2"]]
+}
+contrast.table$geno1
+contrast.table$long <- paste(contrast.table$geno1,".to.",contrast.table$geno2,sep="")
+contrast.table$run <- T
+contrast.table
+```
+
+```{r}
+geno.pairs <- data.frame(matrix(c(T,T,T,F,F,F,T,F,F,T,F,T,F,T,F,F,T,T,F,F,T,T,T,F),nrow=6,ncol=4))
+names(geno.pairs) <- c("B73","W22","Mo17","PH207")
+
+geno.trios <- data.frame(matrix(c(T,T,T,F,T,T,F,T,T,F,T,T,F,T,T,T),nrow=4,ncol=4))
+names(geno.trios) <- c("B73","W22","Mo17","PH207")
+```
+
+
+# Load input files
+
+Load annotation comparison files (outputs of script filter_BWA_output_for_edge_reads_V6.pl)
+```{r}
+# btow <- read.table("BtoW_annotation_4Jan19.txt",header=T,stringsAsFactors = F)
+# btoph <- read.table("BtoPH_annotation_11Jan19.txt",header=T,stringsAsFactors = F)
+# btom <- read.table("BtoM_annotation_11Jan19.txt",header=T,stringsAsFactors = F)
+# 
+# wtob <- read.table("WtoB_annotation_4Jan19.txt",header=T,stringsAsFactors = F)
+# wtoph <- read.table("WtoPH_annotation_11Jan19.txt",header=T,stringsAsFactors = F)
+# wtom <- read.table("WtoM_annotation_11Jan19.txt",header=T,stringsAsFactors = F)
+# 
+# phtob <- read.table("PtoB_annotation_4Jan19.txt",header=T,stringsAsFactors = F)
+# phtow <- read.table("PtoW_annotation_11Jan19.txt",header=T,stringsAsFactors = F)
+# phtom <- read.table("PtoM_annotation_4Jan19.txt",header=T,stringsAsFactors = F)
+# 
+# mtob <- read.table("MtoB_annotation_4Jan19.txt",header=T,stringsAsFactors = F)
+# mtow <- read.table("MtoW_annotation_4Jan19.txt",header=T,stringsAsFactors = F)
+# mtoph <- read.table("MtoPH_annotation_11Jan19.txt",header=T,stringsAsFactors = F)
+```
+
+
+
+
+Load lastz files
+```{r}
+# for(i in grep(TRUE,contrast.table$run)){
+#   tmp <- read.table(paste("lastz_",contrast.table[i,"long"],".txt",sep=""),header=F,stringsAsFactors = F)
+#   names(tmp) <- c(paste(contrast.table[i,"geno1"],"TE",sep="."),"lastz.coverage")
+#   hist(tmp$lastz.coverage,breaks=50,main = paste(contrast.table[i,"long"]))
+#   assign(paste(rownames(contrast.table)[i],"lastz",sep="."),tmp)
+#   print(paste(rownames(contrast.table)[i],"lastz",sep="."))
+# }
+```
+
+Load TE annotation files
+```{r}
+B73.te.gff <- read.table("B73.structuralTEv2.2018.12.20.filteredTE.gff3",header=F,stringsAsFactors = F)
+B73.te.gff$TE <- substr(B73.te.gff$V9,4,24)
+B73.te.gff <- B73.te.gff[B73.te.gff$V1 %in% 1:10,]
+B73.te.gff$fam <- substr(B73.te.gff$TE,0,8)
+B73.te.gff$superfam <- substr(B73.te.gff$TE,0,3)
+B73.te.gff$order <- substr(B73.te.gff$TE,0,2)
+
+v1.B73.te.gff <- read.table("B73v4_structural_filtered_newTIRID_detectMITE_noSINEdup.Feb92017.noDepreciatedSolos.noproblemhelitrons.gff3",header=F,stringsAsFactors = F)
+v1.B73.te.gff$TE <- substr(v1.B73.te.gff$V9,4,21)
+v1.B73.te.gff <- v1.B73.te.gff[v1.B73.te.gff$V1 %in% 1:10,]
+v1.B73.te.gff$fam <- substr(v1.B73.te.gff$TE,0,8)
+v1.B73.te.gff$superfam <- substr(v1.B73.te.gff$TE,0,3)
+v1.B73.te.gff$order <- substr(v1.B73.te.gff$TE,0,2)
+
+W22.te.gff <- read.table("W22.structuralTEv2.10.08.2018.filteredTE.gff3",header=F,stringsAsFactors = F)
+W22.te.gff$TE <- substr(W22.te.gff$V9,4,24)
+W22.te.gff <- W22.te.gff[W22.te.gff$V1 %in% 1:10,]
+W22.te.gff$fam <- substr(W22.te.gff$TE,0,8)
+W22.te.gff$superfam <- substr(W22.te.gff$TE,0,3)
+W22.te.gff$order <- substr(W22.te.gff$TE,0,2)
+
+Mo17.te.gff <- read.table("Mo17.structuralTEv2.2018.12.28.filteredTE.gff3",header=F,stringsAsFactors = F)
+Mo17.te.gff$TE <- substr(Mo17.te.gff$V9,4,24)
+Mo17.te.gff <- Mo17.te.gff[Mo17.te.gff$V1 %in% 1:10,]
+Mo17.te.gff$fam <- substr(Mo17.te.gff$TE,0,8)
+Mo17.te.gff$superfam <- substr(Mo17.te.gff$TE,0,3)
+Mo17.te.gff$order <- substr(Mo17.te.gff$TE,0,2)
+
+PH207.te.gff <- read.table("PH207.structuralTEv2.2018.10.30.filteredTE.gff3",header=F,stringsAsFactors = F)
+PH207.te.gff$chr <- ifelse(grepl("chr0",PH207.te.gff$V1),substr(PH207.te.gff$V1,5,nchar(PH207.te.gff$V1)),substr(PH207.te.gff$V1,4,nchar(PH207.te.gff$V1)))
+PH207.te.gff <- PH207.te.gff[PH207.te.gff$chr %in% 1:10,c(10,2:9)]
+names(PH207.te.gff)[1] <- "V1"
+PH207.te.gff$TE <- substr(PH207.te.gff$V9,4,24)
+PH207.te.gff$fam <- substr(PH207.te.gff$TE,0,8)
+PH207.te.gff$superfam <- substr(PH207.te.gff$TE,0,3)
+PH207.te.gff$order <- substr(PH207.te.gff$TE,0,2)
+```
+
+Load annotation information
+```{r}
+B73.attributes <- read.table("B73_filteredTE_combined_attributes_12.20.18.txt",header=T,stringsAsFactors = F)
+W22.attributes <- read.table("W22_filteredTE_combined_attributes_10.8.18.txt",header=T,stringsAsFactors = F)
+PH207.attributes <- read.table("PH207_filteredTE_combined_attributes_10.30.18.txt",header=T,stringsAsFactors = F)
+Mo17.attributes <- read.table("Mo17_filteredTE_combined_attributes_12.28.18.txt",header = T,stringsAsFactors = F)
+```
+
+Load annotation features
+```{r}
+B73.nests <- read.table("B73_nested_filteredTE_20Dec18.txt",header=T,stringsAsFactors = F)
+W22.nests <- read.table("W22_nested_filteredTE_20Dec18.txt",header=T,stringsAsFactors = F)
+PH207.nests <- read.table("PH207_nested_filteredTE_NOscaffold_20Dec18.txt",header=T,stringsAsFactors = F)
+Mo17.nests <- read.table("Mo17_nested_filteredTE_all_hosts_28Dec18.txt",header=T,stringsAsFactors = F)
+```
+
+Load gene colinearity files
+```{r}
+syntenic_big_table <- read.table("~/Dropbox/mn/maize_syntenic_genes_Alex's_paper.txt",stringsAsFactors = F,header = T)
+syntenic_draft <- unique(c(syntenic_big_table$B73maize1_Gene,syntenic_big_table$B73maize2_Gene))
+syntenic.B73 <- syntenic_draft[grep("Zm",syntenic_draft)]
+
+gene_key_bw <- read.table("2018-08-21_b73-w22_key-beta.txt",header=F,stringsAsFactors = F)
+names(gene_key_bw) <- c("b.chr","b.start","b.end","b.gene","w.chr","w.start","w.end","w.gene","source","category")
+gene_key_bph <- read.table("2018-08-21_b73-ph207_key-beta.txt",header=F,stringsAsFactors = F)
+names(gene_key_bph) <- c("b.chr","b.start","b.end","b.gene","ph.chr","ph.start","ph.end","ph.gene","source","category")
+gene_key_bpb <- read.table("2018-08-21_b73-phb47_key-beta.txt",header=F,stringsAsFactors = F)
+names(gene_key_bpb) <- c("b.chr","b.start","b.end","b.gene","pb.chr","pb.start","pb.end","pb.gene","source")
+gene_key_bm <- read.table("2018-08-21_b73-mo17_key-beta.txt",header=F,stringsAsFactors = F)
+names(gene_key_bm) <- c("b.chr","b.start","b.end","b.gene","m.chr","m.start","m.end","m.gene","source")
+gene_key_phm <- read.table("2018-08-21_ph207-mo17_key-beta.txt",header=F,stringsAsFactors = F)
+names(gene_key_phm) <- c("ph.chr","ph.start","ph.end","ph.gene","m.chr","m.start","m.end","m.gene","source")
+gene_key_wm <- read.table("2018-08-21_w22-mo17_key-beta.txt",header=F,stringsAsFactors = F)
+names(gene_key_wm) <- c("w.chr","w.start","w.end","w.gene","m.chr","m.start","m.end","m.gene","source")
+
+syntenic.W22 <- unique(subset(gene_key_bw,gene_key_bw$b.gene %in% syntenic.B73)[,"w.gene"])
+syntenic.PH207 <- unique(subset(gene_key_bph,gene_key_bph$b.gene %in% syntenic.B73)[,"ph.gene"])
+syntenic.Mo17 <- unique(subset(gene_key_bm,gene_key_bm$b.gene %in% syntenic.B73)[,"m.gene"])
+```
+
+```{r}
+syntenic_big_table$differentially.fractinated <- ifelse(is.na(syntenic_big_table$B73maize1_Gene) & !is.na(syntenic_big_table$PH207maize1_Gene), "B73.maize1.loss",ifelse(
+  is.na(syntenic_big_table$B73maize2_Gene) & !is.na(syntenic_big_table$PH207maize2_Gene), "B73.maize2.loss",ifelse(
+    !is.na(syntenic_big_table$B73maize1_Gene) & is.na(syntenic_big_table$PH207maize1_Gene), "PH207.maize1.loss",ifelse(
+      !is.na(syntenic_big_table$B73maize2_Gene) & is.na(syntenic_big_table$PH207maize2_Gene),"PH207.maize2.loss",NA))))
+B73.syntenic.lost.in.PH207 <- c(subset(syntenic_big_table,syntenic_big_table$differentially.fractinated == "PH207.maize1.loss")[,"B73maize1_Gene"],subset(syntenic_big_table,syntenic_big_table$differentially.fractinated == "PH207.maize2.loss")[,"B73maize2_Gene"])
+```
+
+Gene function table
+ftp://ftp.gramene.org/pub/gramene/CURRENT_RELEASE/gff3/zea_mays/gene_function/B73v4.gene_function.txt accessed 8 November 2018
+```{r}
+gramene.function <- read.delim("B73v4.gene_function_gramene.txt",header=F,stringsAsFactors = F,sep="\t",fill=T)
+names(gramene.function) <- c("gene","gramene.function","V3")
+gramene.function$V3 <- NULL
+```
+
+
+# Functions
+## Create combo.class column
+```{r}
+make.categories <- function(contrast,geno1,geno2){
+  contrast2 <- merge(get(contrast),get(paste(contrast,"lastz",sep=".")),by= paste(geno1,"TE",sep="."),all.x=T)
+  contrast2[,paste("combo.class",contrast,sep=".")] <- ifelse(contrast2[,paste(contrast.table[i,"long"],"class_full",sep=".")] == "te.gone","non.shared.site.defined",
+                                   ifelse(contrast2[,paste(contrast.table[i,"long"],"class_group",sep=".")] == "non.shared","non.shared.homology",
+                                          ifelse(grepl("shared",contrast2[,paste(contrast.table[i,"long"],"class_group",sep=".")]),"shared.site.defined",
+                                                 ifelse(contrast2$lastz.coverage < 0.1, "non.shared.homology",
+                                                        ifelse(contrast2$lastz.coverage > 0.9, "shared.homology","unresolved")))))
+  contrast2[is.na(contrast2[,paste("combo.class",contrast,sep=".")]),paste("combo.class",contrast,sep=".")] <- "unresolved"
+  contrast2b <- contrast2
+  contrast2b[,paste(geno2,"coordinates",sep=".")] <- ifelse(grepl("site.defined",contrast2[,paste("combo.class",contrast,sep=".")]),contrast2[,paste(geno2,"coordinates",sep=".")],NA)
+  tmp <- get(paste(geno1,"te.gff",sep=".")) #This needs to check the TE gff file instead
+  contrast2.keep <- subset(contrast2b,contrast2b[,1] %in% tmp$TE)
+  return(contrast2.keep)
+}
+```
+
+### igv.within
+```{r}
+igv.within <- function(outer,inner){
+  chr1 <- unlist(strsplit(outer,":"))[c(TRUE,FALSE)]
+  rmchr1 <- unlist(strsplit(outer,":"))[c(FALSE,TRUE)]
+  findstart1 <- as.numeric(unlist(strsplit(rmchr1,"-"))[c(TRUE,FALSE)])
+  findend1 <- as.numeric(unlist(strsplit(rmchr1,"-"))[c(FALSE,TRUE)])
+  chr2 <- unlist(strsplit(inner,":"))[c(TRUE,FALSE)]
+  rmchr2 <- unlist(strsplit(inner,":"))[c(FALSE,TRUE)]
+  findstart2 <- as.numeric(unlist(strsplit(rmchr2,"-"))[c(TRUE,FALSE)])
+  findend2 <- as.numeric(unlist(strsplit(rmchr2,"-"))[c(FALSE,TRUE)])
+  return(chr1 == chr2 & findend1 >= findend2 & findstart1 <= findstart2)
+}
+igv.start <- function(argv1){
+  rmchr <- unlist(strsplit(argv1,":"))[c(FALSE,TRUE)]
+  findstart <- as.numeric(unlist(strsplit(rmchr,"-"))[c(TRUE,FALSE)])
+  return(findstart)
+}
+igv.end <- function(argv1){
+  rmchr <- unlist(strsplit(argv1,":"))[c(FALSE,TRUE)]
+  findend <- as.numeric(unlist(strsplit(rmchr,"-"))[c(FALSE,TRUE)])
+  return(findend)
+}
+igv.chr <- function(argv1){
+  chr <- as.numeric(unlist(strsplit(argv1,":"))[c(TRUE,FALSE)])
+  return(chr)
+}
+```
+
+## Determine TE family size
+```{r}
+family.size.table <- function(geno){
+  fam.size <- data.frame(table(substr(get(paste(geno,"te.gff",sep="."))[,"TE"],0,8)))
+  names(fam.size) <- c("fam",paste("annotated.in",geno,sep="."))
+  return(fam.size)
+}
+```
+
+## Summarize TEs in each combo class
+```{r}
+combo.summary <- function(contrast,geno){
+  one.summary <- data.frame(table(contrast$combo.class))
+  names(one.summary) <- c("category","count")
+  one.summary$all <- "all"
+  for(i in 1:nrow(one.summary)){
+    gff <- get(paste(geno,"attributes",sep="."))
+    one.summary[i,"bp"] <- sum(gff[gff$TE %in% subset(contrast,contrast$combo.class == one.summary[i,"category"])[,paste(geno,"TE",sep=".")],"disjoined"])
+    one.summary[i,"Mb"] <- one.summary[i,"bp"]/1e6
+  }
+  one.summary$category <- factor(one.summary$category,levels=rev(c("shared.site.defined","shared.homology","unresolved","non.shared.homology","non.shared.site.defined")))
+return(one.summary)
+}
+```
+
+```{r}
+give.n <- function(x){
+   return(c(y = mean(x), label = length(x)))
+}
+```
+
+
+# Create files
+
+## Make combo.class column for all contrasts
+```{r}
+# for(i in grep(TRUE,contrast.table$run)){
+#   assign(contrast.table$contrast[i],make.categories(substr(contrast.table$contrast[i],0,nchar(contrast.table$contrast[i])-1),contrast.table$geno1[i],contrast.table$geno2[i]))
+#   print(contrast.table$contrast[i])
+# }
+```
+
+### Save combo files 
+```{r}
+ # for(i in grep(TRUE,contrast.table$run)){
+ #   write.table(get(contrast.table$contrast[i]),file=paste("comparisons_V2_annotations/",contrast.table$geno1[i],".to.",contrast.table$geno2[i],".polyTE.comparsions.txt",sep=""),quote = F,sep="\t")
+ #   print(contrast.table$contrast[i])
+ # }
+```
+
+
+### Read in combo files
+```{r}
+ for(i in grep(TRUE,contrast.table$run)){
+   assign(get(contrast.table$contrast[i]),read.table(paste("comparisons_V2_annotations/",contrast.table$geno1[i],".to.",contrast.table$geno2[i],".polyTE.comparsions.txt",sep=""),header=T,stringsAsFactors = F))
+   print(contrast.table$contrast[i])
+ }
+```
+
+
+### Combine contrasts into single df
+```{r}
+btoall2 <- Reduce(function(x, y) merge(x, y, all=TRUE), list(btow2[,c(1:2,7,18)], btoph2[,c(1,7,18)], btom2[,c(1,7,18)]))
+tofix2 <- btoall2[is.na(btoall2$B73.coordinates),]
+for(i in 1:nrow(tofix2)){
+  btoall2[rownames(tofix2)[i],"B73.coordinates"] <- ifelse(tofix2$B73.TE[i] %in% btom2$B73.TE,btom2[btom2$B73.TE == tofix2$B73.TE[i],"B73.coordinates"],
+                                                  ifelse(tofix2$B73.TE[i] %in% btoph2$B73.TE,btoph2[btoph2$B73.TE == tofix2$B73.TE[i],"B73.coordinates"],"error"))
+}
+btoall2[,c(4,6,8)][is.na(btoall2[,c(4,6,8)])] <- "unresolved"
+btoall2$W22.coordinates <- ifelse(grepl("site.defined",btoall2$combo.class.btow),btoall2$W22.coordinates,NA)
+btoall2$PH207.coordinates <- ifelse(grepl("site.defined",btoall2$combo.class.btoph),btoall2$PH207.coordinates,NA)
+btoall2$Mo17.coordinates <- ifelse(grepl("site.defined",btoall2$combo.class.btom),btoall2$Mo17.coordinates,NA)
+
+
+wtoall2 <- Reduce(function(x, y) merge(x, y, all=TRUE), list(wtob2[,c(1:2,7,18)], wtoph2[,c(1,7,18)], wtom2[,c(1,7,18)]))
+tofix3 <- wtoall2[is.na(wtoall2$W22.coordinates),]
+for(i in 1:nrow(tofix3)){
+  wtoall2[rownames(tofix3)[i],"W22.coordinates"] <- ifelse(tofix3$W22.TE[i] %in% wtom2$W22.TE,wtom2[wtom2$W22.TE == tofix3$W22.TE[i],"W22.coordinates"],
+                                                  ifelse(tofix3$W22.TE[i] %in% wtoph2$W22.TE,wtoph2[wtoph2$W22.TE == tofix3$W22.TE[i],"W22.coordinates"],"error"))
+}
+wtoall2[,c(4,6,8)][is.na(wtoall2[,c(4,6,8)])] <- "unresolved"
+wtoall2$B73.coordinates <- ifelse(grepl("site.defined",wtoall2$combo.class.wtob),wtoall2$B73.coordinates,NA)
+wtoall2$PH207.coordinates <- ifelse(grepl("site.defined",wtoall2$combo.class.wtoph),wtoall2$PH207.coordinates,NA)
+wtoall2$Mo17.coordinates <- ifelse(grepl("site.defined",wtoall2$combo.class.wtom),wtoall2$Mo17.coordinates,NA)
+
+
+phtoall2 <- Reduce(function(x, y) merge(x, y, all=TRUE), list(phtob2[,c(1:2,7,18)], phtow2[,c(1,7,18)], phtom2[,c(1,7,18)]))
+tofix4 <- phtoall2[is.na(phtoall2$PH207.coordinates),]
+for(i in 1:nrow(tofix4)){
+  phtoall2[rownames(tofix4)[i],"PH207.coordinates"] <- ifelse(tofix4$PH207.TE[i] %in% phtom2$PH207.TE,phtom2[phtom2$PH207.TE == tofix4$PH207.TE[i],"PH207.coordinates"],
+                                                  ifelse(tofix4$PH207.TE[i] %in% phtow2$PH207.TE,phtow2[phtow2$PH207.TE == tofix4$PH207.TE[i],"PH207.coordinates"],"error"))
+}
+phtoall2[,c(4,6,8)][is.na(phtoall2[,c(4,6,8)])] <- "unresolved"
+phtoall2$W22.coordinates <- ifelse(grepl("site.defined",phtoall2$combo.class.phtow),phtoall2$W22.coordinates,NA)
+phtoall2$B73.coordinates <- ifelse(grepl("site.defined",phtoall2$combo.class.phtob),phtoall2$B73.coordinates,NA)
+phtoall2$Mo17.coordinates <- ifelse(grepl("site.defined",phtoall2$combo.class.phtom),phtoall2$Mo17.coordinates,NA)
+
+mtoall2 <- Reduce(function(x, y) merge(x, y, all=TRUE), list(mtob2[,c(1:2,7,18)], mtow2[,c(1,7,18)], mtoph2[,c(1,7,18)]))
+tofix4 <- mtoall2[is.na(mtoall2$Mo17.coordinates),]
+for(i in 1:nrow(tofix4)){
+  mtoall2[rownames(tofix4)[i],"Mo17.coordinates"] <- ifelse(tofix4$Mo17.TE[i] %in% mtoph2$Mo17.TE,mtoph2[mtoph2$Mo17.TE == tofix4$Mo17.TE[i],"Mo17.coordinates"],
+                                                  ifelse(tofix4$Mo17.TE[i] %in% mtow2$Mo17.TE,mtow2[mtow2$Mo17.TE == tofix4$Mo17.TE[i],"Mo17.coordinates"],"error"))
+}
+mtoall2[,c(4,6,8)][is.na(mtoall2[,c(4,6,8)])] <- "unresolved"
+mtoall2$W22.coordinates <- ifelse(grepl("site.defined",mtoall2$combo.class.mtow),mtoall2$W22.coordinates,NA)
+mtoall2$B73.coordinates <- ifelse(grepl("site.defined",mtoall2$combo.class.mtob),mtoall2$B73.coordinates,NA)
+mtoall2$PH207.coordinates <- ifelse(grepl("site.defined",mtoall2$combo.class.mtoph),mtoall2$PH207.coordinates,NA)
+```
+
+Make subsets of B73 TEs based on categories
+```{r}
+btoall2$present.genos <- rowSums(btoall2 == "shared.homology" | btoall2 == "shared.site.defined",na.rm=T) + 1
+btoall2$absent.genos <- rowSums(btoall2 == "non.shared.homology" | btoall2 == "non.shared.site.defined",na.rm=T)
+btoall2$unresolved <- rowSums(btoall2 == "unresolved",na.rm=T)
+
+b.resolved <- subset(btoall2,btoall2$unresolved == 0)
+b.resolved$type <- ifelse(rowSums(b.resolved == "non.shared.site.defined",na.rm=T) == 3,"site.defined.B73.unique",ifelse(b.resolved$present.genos == 4, "core",ifelse(b.resolved$present.genos == 1, "B73.unique","variable")))
+b.resolved$unresolved <- NULL
+
+tmp <- subset(b.resolved,rowSums(b.resolved == "non.shared.site.defined",na.rm=T) == 2 & rowSums(b.resolved == "shared.site.defined",na.rm=T) == 1)
+tmp2 <- data.frame(table(tmp$fam))
+
+#W22
+wtoall2$present.genos <- rowSums(wtoall2 == "shared.homology" | wtoall2 == "shared.site.defined",na.rm=T) + 1
+wtoall2$absent.genos <- rowSums(wtoall2 == "non.shared.homology" | wtoall2 == "non.shared.site.defined",na.rm=T)
+wtoall2$unresolved <- rowSums(wtoall2 == "unresolved",na.rm=T)
+
+w.resolved <- subset(wtoall2,wtoall2$unresolved == 0)
+w.resolved$type <- ifelse(rowSums(w.resolved == "non.shared.site.defined",na.rm=T) == 3,"site.defined.W22.unique",ifelse(w.resolved$present.genos == 4, "core",ifelse(w.resolved$present.genos == 1, "W22.unique","variable")))
+w.resolved$unresolved <- NULL
+
+#PH207
+phtoall2$present.genos <- rowSums(phtoall2 == "shared.homology" | phtoall2 == "shared.site.defined",na.rm=T) + 1
+phtoall2$absent.genos <- rowSums(phtoall2 == "non.shared.homology" | phtoall2 == "non.shared.site.defined",na.rm=T)
+phtoall2$unresolved <- rowSums(phtoall2 == "unresolved",na.rm=T)
+
+ph.resolved <- subset(phtoall2,phtoall2$unresolved == 0)
+ph.resolved$type <- ifelse(rowSums(ph.resolved == "non.shared.site.defined",na.rm=T) == 3,"site.defined.PH207.unique",ifelse(ph.resolved$present.genos == 4, "core",ifelse(ph.resolved$present.genos == 1, "PH207.unique","variable")))
+ph.resolved$unresolved <- NULL
+
+#Mo17
+mtoall2$present.genos <- rowSums(mtoall2 == "shared.homology" | mtoall2 == "shared.site.defined",na.rm=T) + 1
+mtoall2$absent.genos <- rowSums(mtoall2 == "non.shared.homology" | mtoall2 == "non.shared.site.defined",na.rm=T)
+mtoall2$unresolved <- rowSums(mtoall2 == "unresolved",na.rm=T)
+
+m.resolved <- subset(mtoall2,mtoall2$unresolved == 0)
+m.resolved$type <- ifelse(rowSums(m.resolved == "non.shared.site.defined",na.rm=T) == 3,"site.defined.Mo17.unique",ifelse(m.resolved$present.genos == 4, "core",ifelse(m.resolved$present.genos == 1, "Mo17.unique","variable")))
+m.resolved$unresolved <- NULL
+
+table(b.resolved$type)
+table(w.resolved$type)
+table(ph.resolved$type)
+table(m.resolved$type)
+```
+
+
+### Make TE family size tables
+```{r}
+for(i in grep(TRUE,geno.table$run)){
+  assign(paste("fam.size",geno.table$short.geno[i],sep="."),family.size.table(geno.table$genotype[i]))
+  print(paste("fam.size",geno.table$short.geno[i],sep="."))
+}
+fam.size.all <- Reduce(function(x, y) merge(x, y, all=TRUE), list(fam.size.b,fam.size.w,fam.size.ph,fam.size.m))
+fam.size.all[is.na(fam.size.all)] <- 0
+
+fam.size.all$B73 <- ifelse(fam.size.all$annotated.in.B73 == 1, "singleton",
+                                   ifelse(fam.size.all$annotated.in.B73 >1 & fam.size.all$annotated.in.B73 < 10, "small",
+                                          ifelse(fam.size.all$annotated.in.B73 >= 10 & fam.size.all$annotated.in.B73 < 100, "medium",
+                                                 ifelse(fam.size.all$annotated.in.B73 >= 100 & fam.size.all$annotated.in.B73 < 1000,"large",
+                                                        ifelse(fam.size.all$annotated.in.B73 == 0, "absent","extra.large")))))
+fam.size.all$W22 <- ifelse(fam.size.all$annotated.in.W22 == 1, "singleton",
+                                   ifelse(fam.size.all$annotated.in.W22 >1 & fam.size.all$annotated.in.W22 < 10, "small",
+                                          ifelse(fam.size.all$annotated.in.W22 >= 10 & fam.size.all$annotated.in.W22 < 100, "medium",
+                                                 ifelse(fam.size.all$annotated.in.W22 >= 100 & fam.size.all$annotated.in.W22 < 1000,"large",
+                                                        ifelse(fam.size.all$annotated.in.W22 == 0, "absent","extra.large")))))
+fam.size.all$PH207 <- ifelse(fam.size.all$annotated.in.PH207 == 1, "singleton",
+                                   ifelse(fam.size.all$annotated.in.PH207 >1 & fam.size.all$annotated.in.PH207 < 10, "small",
+                                          ifelse(fam.size.all$annotated.in.PH207 >= 10 & fam.size.all$annotated.in.PH207 < 100, "medium",
+                                                 ifelse(fam.size.all$annotated.in.PH207 >= 100 & fam.size.all$annotated.in.PH207 < 1000,"large",
+                                                        ifelse(fam.size.all$annotated.in.PH207 == 0, "absent","extra.large")))))
+fam.size.all$Mo17 <- ifelse(fam.size.all$annotated.in.Mo17 == 1, "singleton",
+                                   ifelse(fam.size.all$annotated.in.Mo17 >1 & fam.size.all$annotated.in.Mo17 < 10, "small",
+                                          ifelse(fam.size.all$annotated.in.Mo17 >= 10 & fam.size.all$annotated.in.Mo17 < 100, "medium",
+                                                 ifelse(fam.size.all$annotated.in.Mo17 >= 100 & fam.size.all$annotated.in.Mo17 < 1000,"large",
+                                                        ifelse(fam.size.all$annotated.in.Mo17 == 0, "absent","extra.large")))))
+```
+
+
+### Make summary files
+```{r}
+all.combo <- data.frame(matrix(NA,nrow=0,ncol=7))
+names(all.combo) <- c("category","count","all","bp","Mb","contrast","geno")
+
+for(i in grep(TRUE,geno.table$run)){
+  geno <- geno.table[i,"genotype"]
+  geno.contrast <- contrast.table[contrast.table$geno1 == geno,]
+  new.table <- data.frame(matrix(NA,nrow=0,ncol=6))
+  names(new.table) <- c("category","count","all","bp","Mb","contrast")
+  for(j in grep(TRUE,geno.contrast$run)){
+    tmp <- combo.summary(get(geno.contrast[j,"contrast"]),geno)
+    tmp$contrast <- geno.contrast[j,"long"]
+    new.table <- rbind(new.table,tmp)
+  }
+  if (nrow(new.table) > 0){
+    new.table$geno <- geno
+    assign(paste(geno,"combo",sep="."),new.table)
+    print(paste(geno,"combo",sep="."))
+  
+    all.combo <- rbind(all.combo,new.table)
+  }
+}
+
+ggplot() + geom_bar(aes(y=Mb,x=contrast,fill=category),data=all.combo,stat="identity") + scale_fill_manual(values = c("red","darkred","gray","darkblue","dodgerblue")) + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~geno,scales="free")
+
+ggplot() + geom_bar(aes(y=Mb,x=contrast,fill=category),data=all.combo,stat="identity",position = "dodge") + scale_fill_manual(values = c("red","darkred","gray","darkblue","dodgerblue")) + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(contrast~geno,scales="free")
+```
+
+```{r}
+all.combo.error <- all.combo[1:5,]
+all.combo.error$geno <- NULL
+all.combo.error$contrast <- NULL
+all.combo.error$bp <- NULL
+all.combo.error$all <- NULL
+for(i in 1:nrow(all.combo.error)){
+  tmp1 <- subset(all.combo, all.combo$category == all.combo.error[i,"category"])[,"count"]
+  all.combo.error[i,"count"] <- mean(tmp1)
+  all.combo.error[i,"elements.sd"] <- sd(tmp1)
+
+  tmp2 <- subset(all.combo,all.combo$category == all.combo.error[i,"category"])[,"Mb"]
+  all.combo.error[i,"Mb"] <- mean(tmp2)
+  all.combo.error[i,"Mb.sd"] <- sd(tmp2)
+}
+ggplot(all.combo.error, aes(x=category, y=count, fill=category)) +  geom_bar(stat="identity", position=position_dodge()) + geom_errorbar(aes(ymin=count-elements.sd, ymax=count+elements.sd), width=.2, position=position_dodge(.9)) + scale_fill_manual(values = c("red","darkred","gray","darkblue","dodgerblue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+ggplot(all.combo.error, aes(x=category, y=Mb, fill=category)) +  geom_bar(stat="identity", position=position_dodge()) + geom_errorbar(aes(ymin=Mb-Mb.sd, ymax=Mb+Mb.sd), width=.2, position=position_dodge(.9)) + scale_fill_manual(values = c("red","darkred","gray","darkblue","dodgerblue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+```
+
+
+
+## Families, superfamilies, orders, and categories
+```{r}
+families <- as.character()
+for (i in grep(TRUE,geno.table$run)){
+  tmp <- get(paste(geno.table[i,"genotype"],"attributes",sep="."))
+  fams <- unique(tmp$fam)
+  families <- c(families,fams)
+}
+
+superfams <- c("RLG","RLC","RLX","RIT","RIL","RST","DTA","DTH","DTM","DTC","DTT","DTX","DHH")
+superfams.long <- paste(superfams,c("Gypsy LTR","Copia LTR","Unclassified LTR","RTE LINE","L1 LINE","SINE","hAT TIR","Pif/Harbinger TIR","Mutator TIR","CACTA TIR","Tc1/Mariner TIR","Unclassified TIR","Helitron"),sep=": ")
+superfam.rainbow <- c(rainbow(12),"black")
+superfam.rainbow[c(4,6,9,10,11,12)] <- c("#d8ff99","#00992e","#cc99ff","#6600cc","#ff80d5","#cc0099")
+
+classes <- c("RL","DT","DH")
+orders <- c("RL","DT","DH","RI","RS")
+
+categories <- factor(c("shared.site.defined","shared.homology","unresolved","non.shared.homology","non.shared.site.defined"),levels=rev(c("shared.site.defined","shared.homology","unresolved","non.shared.homology","non.shared.site.defined")))
+```
+
+### Annotation summary for all genotypes
+```{r}
+annotated.all <- data.frame(matrix(NA,nrow=0,ncol=5))
+names(annotated.all) <- c("superfam","fams","elements","bp","genotype")
+
+for(i in grep(TRUE,geno.table$run)){
+  geno <- geno.table[i,"genotype"]
+  geno.attributes <- get(paste(geno,"attributes",sep="."))
+  new.table <- data.frame(matrix(NA,nrow=length(superfams),ncol=5))
+  names(new.table) <- c("superfam","fams","elements","Mb","genotype")
+  new.table$superfam <- superfams
+  new.table$genotype <- geno
+  for(j in 1:length(superfams)){
+    new.table[j,"fams"] <- length(unique(subset(geno.attributes,geno.attributes$superfam == superfams[j])[,"fam"]))
+    new.table[j,"elements"] <- nrow(subset(geno.attributes,geno.attributes$superfam == superfams[j]))
+    new.table[j,"Mb"] <- sum(subset(geno.attributes,geno.attributes$superfam == superfams[j])[,"disjoined"]) / 1e6
+  }
+  annotated.all <- rbind(annotated.all,new.table)
+}
+
+annotated.all$superfam <- factor(annotated.all$superfam,levels=superfams)
+
+ggplot() + geom_bar(aes(y=Mb,x=genotype,fill=superfam),data=annotated.all,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = superfam.rainbow)
+ggplot() + geom_bar(aes(y=fams,x=genotype,fill=superfam),data=annotated.all,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = superfam.rainbow)
+ggplot() + geom_bar(aes(y=elements,x=genotype,fill=superfam),data=annotated.all,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = superfam.rainbow)
+```
+
+```{r}
+ggplot() + geom_bar(aes(y=elements,x=genotype,fill=genotype),data=subset(annotated.all,grepl("DT",annotated.all$superfam)),stat="identity",position=position_dodge()) + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(superfam~.,scales="free")
+ggplot() + geom_bar(aes(y=elements,x=superfam,fill=genotype),data=subset(annotated.all,grepl("DT",annotated.all$superfam)),stat="identity",position=position_dodge()) + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = superfam.rainbow[c(2,4,7,10)])
+```
+
+
+Make for orders instead
+```{r}
+annotated.all.orders <- data.frame(matrix(NA,nrow=0,ncol=5))
+names(annotated.all.orders) <- c("order","fams","elements","bp","genotype")
+fam.sizes <- c("singleton","small","medium","large","extra.large")
+
+for(i in grep(TRUE,geno.table$run)){
+  geno <- geno.table[i,"genotype"]
+  geno.attributes <- get(paste(geno,"attributes",sep="."))
+  new.table <- data.frame(matrix(NA,nrow=length(orders),ncol=5))
+  names(new.table) <- c("order","fams","elements","Mb","genotype")
+  new.table$order <- orders
+  new.table$genotype <- geno
+  for(j in 1:length(orders)){
+    new.table[j,"fams"] <- length(unique(subset(geno.attributes,geno.attributes$order == orders[j])[,"fam"]))
+    new.table[j,"elements"] <- nrow(subset(geno.attributes,geno.attributes$order == orders[j]))
+    new.table[j,"Mb"] <- sum(subset(geno.attributes,geno.attributes$order == orders[j])[,"disjoined"]) / 1e6
+    
+    for(k in 1:length(fam.sizes)){
+      new.table[j,fam.sizes[k]] <- nrow(subset(fam.size.all,fam.size.all[,geno] == fam.sizes[k] & grepl(orders[j],fam.size.all$fam)))
+    }
+  }
+  annotated.all.orders <- rbind(annotated.all.orders,new.table)
+}
+
+annotated.all.orders$order <- factor(annotated.all.orders$order,levels=orders)
+
+ggplot() + geom_bar(aes(y=Mb,x=genotype,fill=order),data=annotated.all.orders,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+ggplot() + geom_bar(aes(y=fams,x=genotype,fill=order),data=annotated.all.orders,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+ggplot() + geom_bar(aes(y=elements,x=genotype,fill=order),data=annotated.all.orders,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+```
+
+
+
+### Combo Class Breakdown
+```{r}
+all.categories <- data.frame(matrix(NA,nrow=0,ncol=5))
+names(all.categories) <- c("ord","combo.class","elements","Mb","contrast")
+
+for(i in grep(TRUE,contrast.table$run)){
+  contrast <- rownames(contrast.table)[i]
+  tmp <- get(contrast.table[i,"contrast"])
+  names(tmp)[1] <- "TE"
+  names(tmp)[grep(paste("combo.class",contrast,sep="."),names(tmp))] <- "combo.class"
+  tmp$ord <- ifelse(grepl("DHH",tmp[,1]),"Helitron",
+                      ifelse(grepl("RL",tmp[,1]),"LTR_retrotransposon",
+                                   ifelse(grepl("DT",tmp[,1]),"TIR_transposon","LINES.SINES")))
+  tmp.attributes <- get(paste(contrast.table[i,"geno1"],"attributes",sep="."))
+  tmp.merge <- merge(tmp,tmp.attributes,by = "TE",all=F)
+  
+  tmp.summary <- data.frame(tmp.merge %>% group_by(ord,combo.class) %>% dplyr::summarize(elements = n(),Mb = sum(disjoined) / 1e6))
+  tmp.summary$contrast <- contrast
+  
+  all.categories <- rbind(all.categories,tmp.summary)
+}
+
+all.categories$combo.class <- factor(all.categories$combo.class,levels=rev(c("shared.site.defined","shared.homology","unresolved","non.shared.homology","non.shared.site.defined")))
+all.categories$ord <- factor(all.categories$ord,levels=c("LTR_retrotransposon","TIR_transposon","Helitron","LINES.SINES"))
+
+ggplot() + geom_bar(aes(y=Mb,x=contrast,fill=combo.class),data=all.categories,stat="identity") + scale_fill_manual(values = c("red","darkred","gray","darkblue","dodgerblue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free")
+ggplot() + geom_bar(aes(y=elements,x=contrast,fill=combo.class),data=all.categories,stat="identity") + scale_fill_manual(values = c("red","darkred","gray","darkblue","dodgerblue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales = "free")
+```
+Plot non-shared things
+```{r}
+non.shared.all <- subset(all.categories,grepl("non.shared",all.categories$combo.class))
+ggplot() + geom_bar(aes(y=Mb,x=contrast,fill=combo.class),data=non.shared.all,stat="identity",position = "dodge") + scale_fill_manual(values = c("red","darkred","gray","darkblue","blue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free")
+ggplot() + geom_bar(aes(y=elements,x=contrast,fill=combo.class),data=non.shared.all,stat="identity",position = "dodge") + scale_fill_manual(values = c("red","darkred","gray","darkblue","blue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales = "free")
+
+```
+
+```{r}
+all.contrasts.pretty <- data.frame(matrix(NA,nrow=20,ncol=sum(contrast.table$run=="TRUE") + 2))
+names(all.contrasts.pretty) <- c("call","order",contrast.table[contrast.table$run=="TRUE","long"])
+all.contrasts.pretty$call <- rep(c("shared.site.defined","shared.homology","unresolved","non.shared.homology","non.shared.site.defined"),each=4)
+all.contrasts.pretty$order <- rep(c("all","RL","DT","DH"),times=5)
+
+for(i in 3:ncol(all.contrasts.pretty)){
+  tmp <- get(contrast.table[contrast.table$long == names(all.contrasts.pretty)[i],"contrast"])
+  for(j in 1:nrow(all.contrasts.pretty)){
+    if(all.contrasts.pretty[j,"order"] == "all"){
+      all.contrasts.pretty[j,i] <- nrow(subset(tmp,tmp[,grep("combo.class",names(tmp))] == all.contrasts.pretty[j,"call"] ))
+    }
+    else{
+      all.contrasts.pretty[j,i] <- nrow(subset(tmp,tmp[,grep("combo.class",names(tmp))] == all.contrasts.pretty[j,"call"] & grepl(all.contrasts.pretty[j,"order"],tmp[,1])))
+    }
+  }
+}
+all.contrasts.pretty
+```
+
+Proportion of site-defined that are shared
+```{r}
+sum(all.contrasts.pretty[all.contrasts.pretty$call == "shared.site.defined",3:ncol(all.contrasts.pretty)])/sum(all.contrasts.pretty[grep("site.defined",all.contrasts.pretty$call),3:ncol(all.contrasts.pretty)])
+```
+
+
+
+
+```{r}
+non.shared.mean <- non.shared.all[1:12,]
+non.shared.mean$contrast <- NULL
+rownames(non.shared.mean) <- 1:12
+for(i in 1:nrow(non.shared.mean)){
+  tmp1 <- subset(non.shared.all,non.shared.all$ord == non.shared.mean[i,"ord"] & non.shared.all$combo.class == non.shared.mean[i,"combo.class"])[,"elements"]
+  non.shared.mean[i,"elements"] <- mean(tmp1)
+  non.shared.mean[i,"elements.sd"] <- sd(tmp1)
+
+  tmp2 <- subset(non.shared.all,non.shared.all$ord == non.shared.mean[i,"ord"] & non.shared.all$combo.class == non.shared.mean[i,"combo.class"])[,"Mb"]
+  non.shared.mean[i,"Mb"] <- mean(tmp2)
+  non.shared.mean[i,"Mb.sd"] <- sd(tmp2)
+}
+
+ggplot(non.shared.mean, aes(x=combo.class, y=Mb, fill=combo.class)) +  geom_bar(stat="identity", position=position_dodge()) + geom_errorbar(aes(ymin=Mb-Mb.sd, ymax=Mb+Mb.sd), width=.2, position=position_dodge(.9)) + scale_fill_manual(values = c("red","darkred","gray","darkblue","blue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free") 
+
+ggplot(non.shared.mean, aes(x=combo.class, y=elements, fill=combo.class)) +  geom_bar(stat="identity",  position=position_dodge()) + geom_errorbar(aes(ymin=elements-elements.sd, ymax=elements+elements.sd), width=.2, position=position_dodge(.9)) + scale_fill_manual(values = c("red","darkred","gray","darkblue","blue"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free") 
+```
+
+
+
+Compare all contrasts 
+```{r}
+# remove unresolved
+tmp.b <- b.resolved
+tmp.b$superfam <- substr(tmp.b$B73.TE,0,3)
+tmp2.b <- data.frame(table(tmp.b[,c("present.genos","superfam")]))
+elements.shared.b <- tmp2.b
+elements.shared.b$present.genos <- as.numeric(paste(tmp2.b$present.genos)) 
+elements.shared.b$superfam <- factor(elements.shared.b$superfam,levels=superfams)
+ggplot() + geom_bar(aes(y=Freq,x=present.genos,fill=superfam),data=elements.shared.b,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~superfam) + scale_fill_manual(values = superfam.rainbow)
+
+tmp.b$order <- ifelse(grepl("DH",tmp.b$superfam),"Helitron",ifelse(grepl("DT",tmp.b$superfam),"TIR",ifelse(grepl("RL",tmp.b$superfam),"LTR","LINES.SINES")))
+tmp.b2 <- data.frame(table(tmp.b[,c("present.genos","order")]))
+elements.shared.b2 <- tmp.b2
+elements.shared.b2$present.genos <- as.numeric(paste(tmp.b2$present.genos)) 
+ggplot() + geom_bar(aes(y=Freq,x=present.genos,fill=order),data=elements.shared.b2,stat="identity") + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~order) 
+```
+
+
+
+### Non shared per contrast
+```{r}
+non.shared.per.contrast <- data.frame(matrix(NA,nrow=3,ncol=length(contrast.table[contrast.table$run,"contrast"])))
+names(non.shared.per.contrast) <- contrast.table[contrast.table$run,"contrast"]
+rownames(non.shared.per.contrast) <- classes
+for(i in 1:3){
+  for(j in 1:length(contrast.table[contrast.table$run,"contrast"])){
+    tmp <- get(contrast.table[contrast.table$run,"contrast"][j])
+    non.shared.per.contrast[i,j] <- nrow(subset(tmp,grepl(rownames(non.shared.per.contrast)[i],tmp[,1]) & tmp$combo.class == "non.shared.site.defined"))
+  }
+}
+rownames(non.shared.per.contrast) <- c("LTR","TIR","Helitron")
+names(non.shared.per.contrast) <- contrast.table[contrast.table$run,"long"]
+non.shared.per.contrast
+```
+
+
+TE length
+```{r}
+b.att.res <- merge(B73.attributes,b.resolved[,c("B73.TE","type")],by.x="TE",by.y="B73.TE",all=F)
+b.att.res$ord <- ifelse(grepl("DH",b.att.res$fam),"Helitron",ifelse(grepl("DT",b.att.res$fam),"TIR",ifelse(grepl("RL",b.att.res$fam),"LTR","LINES.SINES")))
+b.att.res$type <- factor(b.att.res$type,levels=c("site.defined.B73.unique","B73.unique","variable","core"))
+ 
+ltr.len <- ggplot(subset(b.att.res,b.att.res$ord == "LTR"),aes(x=type,y=disjoined,fill=ord)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free") + coord_flip()
+tir.len <- ggplot(subset(b.att.res,b.att.res$ord == "TIR"),aes(x=type,y=disjoined,fill=ord)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free") + coord_flip()
+hel.len <- ggplot(subset(b.att.res,b.att.res$ord == "Helitron"),aes(x=type,y=disjoined,fill=ord)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(ord~.,scales="free") + coord_flip()
+grid.arrange(ltr.len,tir.len,hel.len,nrow=3)
+```
+
+LTR similarity
+```{r}
+ggplot(subset(b.att.res,b.att.res$ord == "LTR" & !is.na(b.att.res$LTRsimilarity)),aes(x=type,y=LTRsimilarity,fill=type)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + stat_summary(fun.data = give.n, geom = "text")
+```
+Age for all site defined
+```{r}
+b.age <- b.att.res[,c("TE","LTRsimilarity","type")]
+b.age$type <- paste(b.age$type)
+w.att.res <- merge(W22.attributes,w.resolved[,c("W22.TE","type")],by.x="TE",by.y="W22.TE",all=F)
+ph.att.res <- merge(PH207.attributes,ph.resolved[,c("PH207.TE","type")],by.x="TE",by.y="PH207.TE",all=F)
+m.att.res <- merge(Mo17.attributes,m.resolved[,c("Mo17.TE","type")],by.x="TE",by.y="Mo17.TE",all=F)
+all.age <- rbind(b.age,subset(w.att.res,grepl("unique",w.att.res$type))[,c("TE","LTRsimilarity","type")],subset(ph.att.res,grepl("unique",ph.att.res$type))[,c("TE","LTRsimilarity","type")],subset(m.att.res,grepl("unique",m.att.res$type))[,c("TE","LTRsimilarity","type")])
+all.ltr.age <- subset(all.age,!is.na(all.age$LTRsimilarity))
+```
+
+```{r}
+w.att.res$type <- factor(w.att.res$type,levels=c("site.defined.W22.unique","W22.unique","variable","core"))
+ggplot(subset(w.att.res,w.att.res$order == "RL" & !is.na(w.att.res$LTRsimilarity)),aes(x=type,y=LTRsimilarity,fill=type)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+ stat_summary(fun.data = give.n, geom = "text")
+ph.att.res$type <- factor(ph.att.res$type,levels=c("site.defined.PH207.unique","PH207.unique","variable","core"))
+ggplot(subset(ph.att.res,ph.att.res$order == "RL" & !is.na(ph.att.res$LTRsimilarity)),aes(x=type,y=LTRsimilarity,fill=type)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + stat_summary(fun.data = give.n, geom = "text")
+```
+
+
+```{r}
+all.ltr.age$type <- factor(all.ltr.age$type,levels=c("core","variable","B73.unique","site.defined.B73.unique","W22.unique","site.defined.W22.unique","Mo17.unique","site.defined.Mo17.unique","PH207.unique","site.defined.PH207.unique"))
+ggplot(all.ltr.age,aes(x=type,y=LTRsimilarity,fill=type)) + geom_boxplot() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = c("blue","deepskyblue2","darkred","red","maroon4","maroon1","mediumorchid4","mediumorchid1","pink","gray")) + stat_summary(fun.data = give.n, geom = "text")
+ggplot(all.ltr.age,aes(x=type,y=LTRsimilarity,fill=type)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = c("blue","deepskyblue2","darkred","red","maroon4","maroon1","mediumorchid4","mediumorchid1","pink","gray")) + stat_summary(fun.data = give.n, geom = "text")
+
+```
+
+```{r}
+all.ltr.age$category <- ifelse(grepl("site.defined",all.ltr.age$type),"site.defined.unique",ifelse(grepl("unique",all.ltr.age$type),"unique",paste(all.ltr.age$type)))
+all.ltr.age2 <- subset(all.ltr.age,all.ltr.age$type != "variable")
+all.ltr.age2$category <- factor(all.ltr.age2$category,levels=c("core","unique","site.defined.unique"))
+ggplot(all.ltr.age2,aes(x=category,y=LTRsimilarity,fill=category)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = c("dodgerblue","darkred","red")) + stat_summary(fun.data = give.n, geom = "text") + stat_summary(fun.y=median, geom="point", size=2,color="white")
+```
+
+
+Relation to nearby genes
+For some reason bedtools closest was skipping some overlapping features, so define overlap with a different file
+
+```{r}
+b73.te.gene.intersect <- read.table("intersect_TE_to_gene_B73_28Dec18.txt",header=F,stringsAsFactors = F)
+b73.te.gene <- read.table("B73_closest_gene_to_TEs_28Dec18.txt",header=F,stringsAsFactors = F)
+```
+
+```{r}
+b73.te.gene.intersect$overlap.category <- ifelse(b73.te.gene.intersect$V2 > b73.te.gene.intersect$V7 & b73.te.gene.intersect$V3 < b73.te.gene.intersect$V8,"TE.in.gene",
+                                       ifelse(b73.te.gene.intersect$V2 < b73.te.gene.intersect$V7 & b73.te.gene.intersect$V3 > b73.te.gene.intersect$V8, "gene.in.TE",
+                                              ifelse(b73.te.gene.intersect$V11 > 0, "TE.gene.overlap","no.overlap")))
+b73.te.gene.intersect$TE <- substr(b73.te.gene.intersect$V5,4,24)
+b73.te.gene.intersect$gene <- substr(b73.te.gene.intersect$V10,9,22)
+b73.te.gene.intersect$syntenic <- b73.te.gene.intersect$gene %in% syntenic.B73
+
+b73.te.gene$overlap.category <- ifelse(b73.te.gene$V11 == 0, "TE.gene.overlap",
+                                                     ifelse(abs(b73.te.gene$V11) <= 2000, "TE.near.gene","TE.far.from.gene"))
+b73.te.gene$gene <- substr(b73.te.gene$V10,9,22)
+b73.te.gene$syntenic <- b73.te.gene$gene %in% syntenic.B73
+b73.te.gene$TE <- substr(b73.te.gene$V5,4,24)
+
+combo.b.te.gene <- unique(rbind(subset(b73.te.gene.intersect,b73.te.gene.intersect$overlap.category != "no.overlap")[,c("TE","overlap.category","syntenic")],subset(b73.te.gene,b73.te.gene$overlap.category != "TE.gene.overlap")[,c("TE","overlap.category","syntenic")]))
+```
+
+```{r}
+distance.overlaps <- data.frame(table(combo.b.te.gene[,c("overlap.category","syntenic")]))
+for(i in 1:nrow(distance.overlaps)){
+  tmp1 <- subset(combo.b.te.gene,combo.b.te.gene$syntenic == distance.overlaps[i,"syntenic"] & combo.b.te.gene$overlap.category == distance.overlaps[i,"overlap.category"])
+  tmp2 <- subset(b.resolved,b.resolved$B73.TE %in% tmp1$TE)
+  distance.overlaps[i,"core"] <- nrow(subset(tmp2,tmp2$type == "core"))
+  distance.overlaps[i,"B73.unique"] <- nrow(subset(tmp2,tmp2$type == "B73.unique"))
+  distance.overlaps[i,"B73.unique.site.defined"] <- nrow(subset(tmp2,tmp2$type == "site.defined.B73.unique"))
+  distance.overlaps[i,"variable"] <- nrow(subset(tmp2,tmp2$type == "variable"))
+}
+distance.overlaps
+```
+
+```{r}
+combo.b.te.gene$category2 <- ifelse(combo.b.te.gene$overlap.category == "TE.far.from.gene", "TE.far.from.gene",
+                                    ifelse(combo.b.te.gene$overlap.category == "gene.in.TE" | combo.b.te.gene$overlap.category == "TE.gene.overlap" | combo.b.te.gene$overlap.category == "TE.in.gene","intersect","te.near.gene"))
+combo.b.te.gene$category3 <- ifelse(combo.b.te.gene$category2 == "TE.far.from.gene","TE.far.from.gene",
+                                    ifelse(combo.b.te.gene$category2 == "te.near.gene","te.near.gene",ifelse(
+                                      combo.b.te.gene$syntenic == TRUE, "overlaps.syntenic.gene","overlaps.non-syntenic.gene"
+                                    )))
+combo.b.te.gene$order <- substr(combo.b.te.gene$TE,0,2)
+```
+
+```{r}
+enrichment.te.gene <- data.frame(table(combo.b.te.gene[,c("category3","order")]))
+for(i in 1:nrow(enrichment.te.gene)){
+  tmp1 <- subset(combo.b.te.gene,combo.b.te.gene$category3 == enrichment.te.gene[i,"category3"] & combo.b.te.gene$order == enrichment.te.gene[i,"order"])
+  tmp2 <- subset(b.resolved,b.resolved$B73.TE %in% tmp1$TE)
+  enrichment.te.gene[i,"core"] <- nrow(subset(tmp2,tmp2$type == "core"))
+  enrichment.te.gene[i,"B73.unique"] <- nrow(subset(tmp2,tmp2$type == "B73.unique"))
+  enrichment.te.gene[i,"site.defined.B73.unique"] <- nrow(subset(tmp2,tmp2$type == "site.defined.B73.unique"))
+  enrichment.te.gene[i,"variable"] <- nrow(subset(tmp2,tmp2$type == "variable"))
+}
+enrichment.te.gene$Freq <- NULL
+enrichment.te.gene
+enrichment.te.gene$total <- rowSums(enrichment.te.gene[,3:6])
+enrichment.te.gene2 <- enrichment.te.gene
+enrichment.te.gene2[,3:6]  <-  enrichment.te.gene[,3:6]/rowSums(enrichment.te.gene[,3:6])
+enrichment.te.gene2$total <- NULL
+```
+
+```{r}
+enrichment.te.gene3 <- subset(enrichment.te.gene2,grepl("overlaps",enrichment.te.gene2$category3) & enrichment.te.gene2$order %in% c("DT","DH","RL"))
+melt.enrichment <- melt(enrichment.te.gene3)
+
+for(i in 1:nrow(melt.enrichment)){
+  expected.val <- nrow(subset(b.resolved,b.resolved$type == melt.enrichment[i,"variable"] & grepl(melt.enrichment[i,"order"],b.resolved$B73.TE)))/nrow(subset(b.resolved,grepl(melt.enrichment[i,"order"],b.resolved$B73.TE)))
+  melt.enrichment[i,"expected.val"] <- expected.val
+  melt.enrichment[i,"fold.change"] <- (melt.enrichment[i,"value"] - expected.val) / expected.val
+}
+
+melt.enrichment$variable <- factor(melt.enrichment$variable,levels=c("core","variable","B73.unique","site.defined.B73.unique"))
+melt.enrichment$order <- factor(melt.enrichment$order,levels=c("RL","DT","DH"))
+
+tmp <- melt.enrichment[seq(from=1,to=23,by=2),c(1:3,5)]
+tmp$category3 <- "expected"
+names(tmp)[4] <- "value"
+enrichment.stacked <- rbind(melt.enrichment[,1:4],tmp)
+enrichment.stacked$category3 <- factor(enrichment.stacked$category3,levels=c("expected","overlaps.non-syntenic.gene","overlaps.syntenic.gene"))
+ggplot() + geom_bar(aes(y=value,x=category3,fill=variable),data=enrichment.stacked,stat="identity",color="black")  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~order,scales="free") + scale_fill_manual(values=c("blue","deepskyblue2","darkred","red"))
+
+ggplot() + geom_bar(aes(y=fold.change,x=category3,fill=variable),data=melt.enrichment,stat="identity",position = "dodge",color="black")  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~order,scales="free") + scale_fill_manual(values=c("blue","deepskyblue2","darkred","red"))
+```
+
+Look at any overlap (DISREGARD synteny info) 
+
+```{r}
+enrichment.te.gene.new <- data.frame(table(combo.b.te.gene[,c("category2","order")]))
+for(i in 1:nrow(enrichment.te.gene.new)){
+  tmp1 <- subset(combo.b.te.gene,combo.b.te.gene$category2 == enrichment.te.gene.new[i,"category2"] & combo.b.te.gene$order == enrichment.te.gene.new[i,"order"])
+  tmp2 <- subset(b.resolved,b.resolved$B73.TE %in% tmp1$TE)
+  enrichment.te.gene.new[i,"core"] <- nrow(subset(tmp2,tmp2$type == "core"))
+  enrichment.te.gene.new[i,"B73.unique"] <- nrow(subset(tmp2,tmp2$type == "B73.unique"))
+  enrichment.te.gene.new[i,"site.defined.B73.unique"] <- nrow(subset(tmp2,tmp2$type == "site.defined.B73.unique"))
+  enrichment.te.gene.new[i,"variable"] <- nrow(subset(tmp2,tmp2$type == "variable"))
+}
+enrichment.te.gene.new
+enrichment.te.gene.new$total <- rowSums(enrichment.te.gene.new[,4:7])
+enrichment.te.gene.new2 <- enrichment.te.gene.new
+enrichment.te.gene.new2[,4:7]  <-  enrichment.te.gene.new[,4:7]/rowSums(enrichment.te.gene.new[,4:7])
+enrichment.te.gene.new2$Freq <- NULL
+enrichment.te.gene.new2$total <- NULL
+```
+
+```{r}
+enrichment.te.gene.new3 <- subset(enrichment.te.gene.new2, enrichment.te.gene.new2$order %in% c("DT","DH","RL"))
+melt.enrichment2 <- melt(enrichment.te.gene.new3)
+
+for(i in 1:nrow(melt.enrichment2)){
+  expected.val <- nrow(subset(b.resolved,b.resolved$type == melt.enrichment2[i,"variable"] & grepl(melt.enrichment2[i,"order"],b.resolved$B73.TE)))/nrow(subset(b.resolved,grepl(melt.enrichment2[i,"order"],b.resolved$B73.TE)))
+  melt.enrichment2[i,"expected.val"] <- expected.val
+  melt.enrichment2[i,"fold.change"] <- (melt.enrichment2[i,"value"] - expected.val) / expected.val
+}
+
+melt.enrichment2$variable <- factor(melt.enrichment2$variable,levels=c("core","variable","B73.unique","site.defined.B73.unique"))
+melt.enrichment2$order <- factor(melt.enrichment2$order,levels=c("RL","DT","DH"))
+
+tmp <- melt.enrichment2[seq(from=1,to=36,by=3),c(1:3,5)]
+tmp$category2 <- "expected"
+names(tmp)[4] <- "value"
+enrichment.stacked.new <- rbind(melt.enrichment2[,1:4],tmp)
+enrichment.stacked.new$category2 <- factor(enrichment.stacked.new$category2,levels=c("TE.far.from.gene","te.near.gene","intersect"))
+ggplot() + geom_bar(aes(y=value,x=category2,fill=variable),data=enrichment.stacked.new,stat="identity",color="black")  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~order,scales="free") + scale_fill_manual(values=c("blue","deepskyblue2","darkred","red"))
+
+ggplot() + geom_bar(aes(y=fold.change,x=category2,fill=variable),data=melt.enrichment2,stat="identity",position = "dodge",color="black")  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~order,scales="free") + scale_fill_manual(values=c("blue","deepskyblue2","darkred","red"))
+```
+
+Family sizes
+```{r}
+fam.size.all$order <- factor(ifelse(grepl("DHH",fam.size.all$fam),"Helitron",ifelse(grepl("RL",fam.size.all$fam),"LTR",ifelse(grepl("DT",fam.size.all$fam),"TIR","LINES.SINES"))),levels=c("LTR","TIR","Helitron","LINES.SINES"))
+
+tmp1 <- data.frame(table(fam.size.all[,c("B73","order")]))
+tmp2 <- data.frame(table(fam.size.all[,c("W22","order")]))
+tmp3 <- data.frame(table(fam.size.all[,c("PH207","order")]))
+
+names(tmp1) <- names(tmp2) <- names(tmp3) <- c("category","order","count")
+tmp1$genome <- "B73"
+tmp2$genome <- "W22"
+tmp3$genome <- "PH207"
+
+size.cat.all <- rbind(tmp1,tmp2,tmp3)
+
+ggplot() + geom_bar(aes(y=count,x=genome,fill=category),data=subset(size.cat.all,size.cat.all$category != "absent"),stat="identity")  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(order~.,scales="free")
+
+```
+
+
+Pies
+```{r}
+disjoined.3 <- data.frame(matrix(NA,nrow=3,ncol=4))
+rownames(disjoined.3) <- c("RL","DT","DH")
+names(disjoined.3) <- c("B73","W22","PH207","Mo17")
+for(i in 1:4){
+  tmp <- get(paste(names(disjoined.3)[i],"attributes",sep="."))
+  for(j in 1:3){
+    disjoined.3[j,i] <- sum(subset(tmp,tmp$order == rownames(disjoined.3)[j])[,"disjoined"])
+  }
+}
+rownames(disjoined.3) <- c("LTR","TIR","Helitron")
+disjoined.3["exon",] <-c(61481524,63902006,52273425,58989797) 
+disjoined.3["RepeatMasked",] <- c(326503627,335813123,369262992,337362184)
+disjoined.3["assembly",] <-c(2106338107,2133882017,1893e6,2204525176) 
+disjoined.3
+
+disjoined.3.prop <- disjoined.3[1:5,]
+for(i in 1:5){
+  disjoined.3.prop[i,] <- disjoined.3[i,] / disjoined.3["assembly",] 
+}
+disjoined.3.prop["other",] <- 1-colSums(disjoined.3.prop[1:5,])
+disjoined.3.prop$feature <- rownames(disjoined.3.prop)
+disjoined.3.prop.melt <- melt(disjoined.3.prop)
+disjoined.3.prop.melt$feature <- factor(disjoined.3.prop.melt$feature,levels=c("exon","LTR","TIR","Helitron","RepeatMasked","other"))
+disjoined.3.prop$fill <- c("darkorchid3","green","steelblue","black","gold","gray")
+
+pie(disjoined.3.prop$B73,disjoined.3.prop$feature,main="B73",col=disjoined.3.prop$fill)
+pie(disjoined.3.prop$W22,disjoined.3.prop$feature,main="W22",col=disjoined.3.prop$fill)
+pie(disjoined.3.prop$PH207,disjoined.3.prop$feature,main="PH207",col=disjoined.3.prop$fill)
+pie(disjoined.3.prop$Mo17,disjoined.3.prop$feature,main="Mo17",col=disjoined.3.prop$fill)
+```
+
+```{r}
+for.venn <- data.frame(matrix(NA,nrow=3,ncol=2))
+names(for.venn) <- c("category","freq")
+for.venn$category <- c("B73.only","W22.only","shared")
+#B73 only
+tmp1 <- subset(btow2,grepl("non.shared",btow2$combo.class.btow))
+for.venn[1,2] <- sum(subset(B73.attributes,B73.attributes$TE %in% tmp1$B73.TE)[,"disjoined"]) / 1e6
+#W22 only
+tmp2 <- subset(wtob2,grepl("non.shared",wtob2$combo.class.wtob))
+for.venn[2,2] <- sum(subset(W22.attributes,W22.attributes$TE %in% tmp2$W22.TE)[,"disjoined"]) / 1e6
+#shared
+tmp3 <- subset(btow2,btow2$combo.class.btow == "shared.homology" | btow2$combo.class.btow == "shared.site.defined")
+for.venn[3,2] <- sum(subset(B73.attributes,B73.attributes$TE %in% tmp3$B73.TE)[,"disjoined"]) / 1e6
+for.venn$round <- round(for.venn$freq)
+
+venn.plot <- draw.pairwise.venn(area1 = for.venn[1,3] + for.venn[3,3],area2 = for.venn[2,3] + for.venn[3,3],cross.area = for.venn[3,3],category = c("B73","W22"),fill=c("steelblue","gray"),alpha=c(0.5,0.5),scaled = T)
+```
+
+
+
+Non-redundant TE set - only elements resolved in all
+```{r}
+b.resolved$B73 <- "present"
+b.resolved$W22 <- ifelse(grepl("non.shared",b.resolved$combo.class.btow),"absent","present")
+b.resolved$Mo17 <- ifelse(grepl("non.shared",b.resolved$combo.class.btom),"absent","present")
+b.resolved$PH207 <- ifelse(grepl("non.shared",b.resolved$combo.class.btoph),"absent","present")
+nrow(b.resolved)
+b.nr2 <- merge(B73.attributes,b.resolved,by.x="TE",by.y="B73.TE",all=F)
+b.nr2$source <- "B73"
+
+w.resolved$W22 <- "present"
+w.resolved$B73 <- ifelse(grepl("non.shared",w.resolved$combo.class.wtob),"absent","present")
+w.resolved$Mo17 <- ifelse(grepl("non.shared",w.resolved$combo.class.wtom),"absent","present")
+w.resolved$PH207 <- ifelse(grepl("non.shared",w.resolved$combo.class.wtoph),"absent","present")
+w.nr <- subset(w.resolved,w.resolved$B73 == "absent" | w.resolved$W22.TE %in% add.w$TE)
+nrow(w.nr)
+w.nr2 <- merge(W22.attributes,w.nr,by.x="TE",by.y="W22.TE",all=F)
+w.nr2$source <- "W22"
+
+m.resolved$Mo17 <- "present"
+m.resolved$W22 <- ifelse(grepl("non.shared",m.resolved$combo.class.mtow),"absent","present")
+m.resolved$PH207 <- ifelse(grepl("non.shared",m.resolved$combo.class.mtoph),"absent","present")
+m.resolved$B73 <- ifelse(grepl("non.shared",m.resolved$combo.class.mtob),"absent","present")
+m.nr <- subset(m.resolved,(m.resolved$B73 == "absent" & m.resolved$W22 == "absent") | m.resolved$Mo17.TE %in% add.m$Mo17.TE)
+nrow(m.nr)
+m.nr2 <- merge(Mo17.attributes,m.nr,by.x="TE",by.y="Mo17.TE",all=F)
+m.nr2$source <- "Mo17"
+
+ph.resolved$PH207 <- "present"
+ph.resolved$W22 <- ifelse(grepl("non.shared",ph.resolved$combo.class.phtow),"absent","present")
+ph.resolved$Mo17 <- ifelse(grepl("non.shared",ph.resolved$combo.class.phtom),"absent","present")
+ph.resolved$B73 <- ifelse(grepl("non.shared",ph.resolved$combo.class.phtob),"absent","present")
+ph.nr <- subset(ph.resolved,(ph.resolved$B73 == "absent" & ph.resolved$W22 == "absent" & ph.resolved$Mo17 == "absent") | ph.resolved$PH207.TE %in% add.ph$PH207.TE)
+nrow(ph.nr)
+ph.nr2 <- merge(PH207.attributes,ph.nr,by.x="TE",by.y="PH207.TE",all=F)
+ph.nr2$source <- "PH207"
+```
+
+```{r}
+nr.resolved <- rbind(b.nr2[,c("TE","disjoined","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")],w.nr2[,c("TE","disjoined","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")],m.nr2[,c("TE","disjoined","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")],ph.nr2[,c("TE","disjoined","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")])
+
+table(nr.resolved$source)
+nr.resolved$present.genos <- rowSums(nr.resolved == "present",na.rm=T)
+table(nr.resolved$present.genos)
+nr.resolved$family <- substr(nr.resolved$TE,0,8)
+```
+How many of each order are ever non-shared site defined?
+```{r}
+b.nr2$nssd <- rowSums(b.nr2 == "non.shared.site.defined",na.rm=T)
+w.nr2$nssd <- rowSums(w.nr2 == "non.shared.site.defined",na.rm=T)
+m.nr2$nssd <- rowSums(m.nr2 == "non.shared.site.defined",na.rm=T)
+ph.nr2$nssd <- rowSums(ph.nr2 == "non.shared.site.defined",na.rm=T)
+nssd.order <- table(rbind(b.nr2[,c("order","nssd")],w.nr2[,c("order","nssd")],m.nr2[,c("order","nssd")],ph.nr2[,c("order","nssd")]))
+nssd.order.any <- data.frame(cbind(rownames(nssd.order),rowSums(nssd.order[,2:4])))
+nssd.order.any
+```
+How many non-reference nonshared site defined?
+```{r}
+nssd.nonreference <- data.frame(rbind(cbind(substr(subset(wtoall2,wtoall2$combo.class.wtob == "non.shared.site.defined")[,"W22.TE"],0,2),"W22"),cbind(substr(subset(mtoall2,mtoall2$combo.class.mtob == "non.shared.site.defined" & grepl("non.shared",mtoall2$combo.class.mtow))[,"Mo17.TE"],0,2),"Mo17"),cbind(substr(subset(phtoall2,phtoall2$combo.class.phtob == "non.shared.site.defined" & grepl("non.shared",phtoall2$combo.class.phtow) & grepl("non.shared",phtoall2$combo.class.phtom))[,"PH207.TE"],0,2),"PH207")))
+table(nssd.nonreference[,1])
+nrow(nssd.nonreference)
+```
+
+
+```{r}
+nr.resolved2 <-nr.resolved
+nr.resolved2[,3][nr.resolved2[,3] == "present"] <- "B73"
+nr.resolved2[,5][nr.resolved2[,5] == "present"] <- "W22"
+nr.resolved2[,7][nr.resolved2[,7] == "present"] <- "Mo17"
+nr.resolved2[,9][nr.resolved2[,9] == "present"] <- "PH207"
+nr.resolved2[,c(3,5,7,9)][nr.resolved2[,c(3,5,7,9)] == "absent"] <- NA
+
+nr.resolved2$genos.present <- paste(nr.resolved2[,3],nr.resolved2[,5],nr.resolved2[,7],nr.resolved2[,9],sep=".")
+nr.resolved2$genos.present <- gsub("NA","",nr.resolved2$genos.present)
+table(nr.resolved2$genos.present)
+
+nr.resolved2$order <- substr(nr.resolved2$TE,0,2)
+```
+
+
+```{r}
+nr.resolved2$superfam <- substr(nr.resolved2$TE,0,3)
+summary.nr.resolved <- data.frame(nr.resolved2 %>% group_by(superfam,present.genos,genos.present) %>% dplyr::summarize(elements = n(),Mb = sum(disjoined) / 1e6))
+summary.nr.resolved$present.genos <- factor(summary.nr.resolved$present.genos,levels=c(4,3,2,1))
+
+```
+
+```{r}
+summary.nr.resolved2 <- data.frame(nr.resolved2 %>% group_by(present.genos,genos.present) %>% dplyr::summarize(elements = n(),Mb = sum(disjoined) / 1e6))
+summary.nr.resolved2$present.genos <- factor(summary.nr.resolved2$present.genos,levels=c(4,3,2,1))
+ggplot() + geom_bar(aes(y=Mb,x=present.genos,fill=genos.present),data=summary.nr.resolved2,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15))
+```
+
+```{r}
+b73.centric <- subset(summary.nr.resolved2,grepl("B73",summary.nr.resolved2$genos.present))
+b73.centric2 <- data.frame(matrix(NA,nrow=8,ncol=2))
+names(b73.centric2) <- c("category","Mb")
+b73.centric2$category <- factor(c("B73.unique.TE","shared.with.2","shared.with.3","shared.with.4","unresolved.TE","RepeatMasked","exon","other"),levels=c("B73.unique.TE","shared.with.2","shared.with.3","shared.with.4","unresolved.TE","RepeatMasked","exon","other"))
+rownames(b73.centric2) <- b73.centric2$category
+b73.centric2["B73.unique.TE","Mb"] <- subset(b73.centric,b73.centric$present.genos == 1)[,"Mb"]
+b73.centric2["shared.with.2","Mb"] <- sum(subset(b73.centric,b73.centric$present.genos == 2)[,"Mb"])
+b73.centric2["shared.with.3","Mb"] <- sum(subset(b73.centric,b73.centric$present.genos == 3)[,"Mb"])
+b73.centric2["shared.with.4","Mb"] <- subset(b73.centric,b73.centric$present.genos == 4)[,"Mb"]
+b73.centric2["RepeatMasked","Mb"] <- disjoined.3["RepeatMasked","B73"]/1e6
+b73.centric2["exon","Mb"] <- disjoined.3["exon","B73"]/1e6
+b73.centric2["other","Mb"] <- (disjoined.3["assembly","B73"] - sum(disjoined.3[1:5,"B73"]))/1e6
+b73.centric2["unresolved.TE","Mb"] <- sum(disjoined.3[1:3,"B73"]) / 1e6 - sum(b73.centric2[1:4,"Mb"])
+b73.centric2$genome <- "B73"
+
+ggplot() + geom_bar(aes(y=Mb,x=genome,fill=category),data=b73.centric2,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values=c("#f19aca","#b988e0","#7992d8","#97f2fc","white","gold","black","gray"))
+```
+
+
+```{r}
+summary.nr.resolved3 <- data.frame(nr.resolved2 %>% group_by(present.genos,genos.present,superfam) %>% dplyr::summarize(elements = n(),Mb = sum(disjoined) / 1e6))
+summary.nr.resolved3$present.genos <- factor(summary.nr.resolved3$present.genos,levels=c(4,3,2,1))
+ggplot() + geom_bar(aes(y=Mb,x=present.genos,fill=genos.present),data=subset(summary.nr.resolved3,grepl("RL",summary.nr.resolved3$superfam)),stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15)) + facet_grid(.~superfam,scales="free")
+ggplot() + geom_bar(aes(y=Mb,x=present.genos,fill=genos.present),data=subset(summary.nr.resolved3,grepl("DH",summary.nr.resolved3$superfam)),stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15)) + facet_grid(.~superfam,scales="free")
+ggplot() + geom_bar(aes(y=Mb,x=present.genos,fill=genos.present),data=subset(summary.nr.resolved3,grepl("DT",summary.nr.resolved3$superfam)),stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15)) + facet_grid(.~superfam,scales="free")
+```
+
+```{r}
+ggplot() + geom_bar(aes(y=Mb,x=present.genos,fill=genos.present),data=summary.nr.resolved3,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15)) + facet_wrap(.~superfam,scales="free")
+```
+
+```{r}
+proportion.variable.per.superfam <- data.frame(matrix(NA,nrow=length(unique(summary.nr.resolved3$superfam)),ncol=3))
+names(proportion.variable.per.superfam) <- c("superfam","shared","total")
+proportion.variable.per.superfam$superfam <- unique(summary.nr.resolved3$superfam)
+for(i in 1:nrow(proportion.variable.per.superfam)){
+  proportion.variable.per.superfam[i,"shared"] <- subset(summary.nr.resolved3,summary.nr.resolved3$present.genos == 4 & summary.nr.resolved3$superfam == proportion.variable.per.superfam[i,"superfam"])[,"elements"]
+  proportion.variable.per.superfam[i,"total"] <- sum(subset(summary.nr.resolved3, summary.nr.resolved3$superfam == proportion.variable.per.superfam[i,"superfam"])[,"elements"])
+}
+proportion.variable.per.superfam$prop.shared <- proportion.variable.per.superfam$shared / proportion.variable.per.superfam$total
+proportion.variable.per.superfam$percent.variable <- (1-proportion.variable.per.superfam$prop.shared) * 100
+proportion.variable.per.superfam
+```
+
+```{r}
+ggplot() + geom_bar(aes(y=elements,x=present.genos,fill=genos.present),data=subset(summary.nr.resolved3,grepl("DT",summary.nr.resolved3$superfam)),stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15)) + facet_grid(superfam~.,scales="free")
+ggplot() + geom_bar(aes(y=Mb,x=present.genos,fill=genos.present),data=subset(summary.nr.resolved3,grepl("RI",summary.nr.resolved3$superfam) | grepl("RS",summary.nr.resolved3$superfam)),stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_manual(values = rainbow(15)) + facet_grid(.~superfam,scales="free")+ facet_grid(superfam~.,scales="free")
+```
+
+
+```{r}
+nr.resolved$variable <- ifelse(nr.resolved$present.genos < 4,"variable","shared")
+nr.resolved$superfam <- substr(nr.resolved$TE,0,3)
+melt.nr <- data.frame(nr.resolved %>% group_by(family) %>% dplyr::summarize(fam.size = n(),count.variable = sum(variable == "variable")))
+melt.nr$variable <- (melt.nr$count.variable / melt.nr$fam.size) * 100
+melt.nr$order <- substr(melt.nr$family,0,2)
+melt.nr$superfam <- substr(melt.nr$family,0,3)
+```
+
+```{r}
+superfam.nr <- data.frame(nr.resolved %>% group_by(superfam) %>% dplyr::summarize(N = n(),count.variable = sum(variable == "variable")))
+superfam.nr$variabe <- (superfam.nr$count.variable/superfam.nr$N) * 100
+superfam.nr
+```
+
+```{r}
+melt.nr.10tir <- subset(melt.nr,melt.nr$order == "DT" & melt.nr$fam.size >= 20)
+melt.nr.10tir$x = 1
+tir.superfams <- c("DTA","DTC","DTH","DTM","DTT","DTX")
+for(i in 1:length(tir.superfams)){
+  tmp <- cbind(with(melt.nr.10tir[grep(tir.superfams[i],melt.nr.10tir$family),],order(-variable)),1:nrow(melt.nr.10tir[grep(tir.superfams[i],melt.nr.10tir$family),]))
+  melt.nr.10tir[grep(tir.superfams[i],melt.nr.10tir$family),"x"] <- order(tmp[,1])
+}
+melt.nr.10tir$family <- factor(melt.nr.10tir$family,levels = melt.nr.10tir[with(melt.nr.10tir,order(superfam,-variable)),"family"])
+```
+
+
+```{r}
+melt.nr.10ltr <- subset(melt.nr,melt.nr$order == "RL" & melt.nr$fam.size >= 20)
+melt.nr.10ltr$family <- factor(melt.nr.10ltr$family,levels = melt.nr.10ltr[with(melt.nr.10ltr,order(superfam,-variable)),"family"])
+ggplot() + geom_point(aes(y=variable,x=family,color=factor(superfam)),data=melt.nr.10ltr)  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+
+melt.nr.10ltr$x = 1
+ltr.superfams <- c("RLC","RLG","RLX")
+for(i in 1:length(ltr.superfams)){
+  tmp <- cbind(with(melt.nr.10ltr[grep(ltr.superfams[i],melt.nr.10ltr$family),],order(-variable)),1:nrow(melt.nr.10ltr[grep(ltr.superfams[i],melt.nr.10ltr$family),]))
+  melt.nr.10ltr[grep(ltr.superfams[i],melt.nr.10ltr$family),"x"] <- order(tmp[,1])
+}
+```
+
+```{r}
+tir.ordered <- ggplot() + geom_point(aes(y=variable,x=x,color=factor(superfam)),data=melt.nr.10tir)  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_color_manual(values=c("springgreen4","palegreen1","green","turquoise3","turquoise1","steelblue4"))
+ltr.ordered <- ggplot() + geom_point(aes(y=variable,x=x,color=factor(superfam)),data=melt.nr.10ltr)  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_color_manual(values=c("purple4","purple1","orchid3"))
+```
+
+```{r}
+grid.arrange(tir.ordered,ltr.ordered)
+```
+
+
+
+```{r}
+ggplot(subset(melt.nr,melt.nr$fam.size >= 20 & melt.nr$order %in% c("RL","DT","DH")),aes(x=superfam,y=variable,fill=superfam)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + stat_summary(fun.data = give.n, geom = "text") + scale_fill_brewer()+ stat_summary(fun.y=median, geom="point", size=2,color="red")
+```
+
+
+```{r}
+nr.famsize <- data.frame(table(substr(nr.resolved$TE,0,8)))
+nr.big.fam <- subset(nr.famsize,nr.famsize$Freq >= 100 & (grepl("DT",nr.famsize$Var1) | grepl("RL",nr.famsize$Var1)))
+names(nr.big.fam) <- c("fam","nr.count")
+nr.big.fam$order <- substr(nr.big.fam$fam,0,2)
+for(i in 1:nrow(nr.big.fam)){
+  nr.big.fam[i,"shared.all"] <- nrow(subset(nr.resolved,grepl(nr.big.fam[i,"fam"],nr.resolved$TE) & nr.resolved$present.genos == 4))
+}
+```
+
+```{r}
+nr.big.fam$shared.prop <- nr.big.fam$shared.all/nr.big.fam$nr.count
+nr.big.fam$variable <- (1-nr.big.fam$shared.prop) * 100
+nr.big.fam.ltr <- subset(nr.big.fam,nr.big.fam$order == "RL")
+nr.big.fam.ltr$fam <- factor(nr.big.fam.ltr$fam,levels=nr.big.fam.ltr[order(nr.big.fam.ltr$variable,decreasing = T),"fam"])
+nr.big.fam.ltr$superfam <- substr(nr.big.fam.ltr$fam,0,3)
+ggplot() + geom_point(aes(y=variable,x=fam,color=factor(superfam)),data=nr.big.fam.ltr)  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+```
+
+```{r}
+nr.big.fam.tir <- subset(nr.big.fam,nr.big.fam$order == "DT")
+nr.big.fam.tir$fam <- factor(nr.big.fam.tir$fam,levels=nr.big.fam.tir[order(nr.big.fam.tir$variable,decreasing = T),"fam"])
+nr.big.fam.tir$superfam <- substr(nr.big.fam.tir$fam,0,3)
+ggplot() + geom_point(aes(y=variable,x=fam,color=factor(superfam)),data=nr.big.fam.tir)  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+```
+
+```{r}
+nr.big.fam$superfamily <- substr(nr.big.fam$fam,0,3)
+ggplot(nr.big.fam,aes(x=superfamily,y=variable,fill=superfamily)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + stat_summary(fun.data = give.n, geom = "text") + stat_summary(fun.y=mean, geom="point", size=2,color="white")
+```
+
+
+```{r}
+nr.resolved.ltr <- rbind(b.nr2[grepl("RL",b.nr2$TE),c("TE","disjoined","LTRsimilarity","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")],w.nr2[grepl("RL",w.nr2$TE),c("TE","disjoined","LTRsimilarity","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")],ph.nr2[grepl("RL",ph.nr2$TE),c("TE","disjoined","LTRsimilarity","B73","B73.coordinates","W22","W22.coordinates","Mo17","Mo17.coordinates","PH207","PH207.coordinates","source")])
+table(nr.resolved.ltr$source)
+nr.resolved.ltr$present.genos <- rowSums(nr.resolved.ltr == "present",na.rm=T)
+table(nr.resolved.ltr$present.genos)
+```
+
+```{r}
+nr.resolved.ltr$family <- substr(nr.resolved.ltr$TE,0,8)
+nr.resolved.ltr$unique <- nr.resolved.ltr$present.genos < 2
+nr.ltr.fam <- data.frame(nr.resolved.ltr %>% group_by(family) %>% dplyr::summarize(fam.size = n(),mean.age = mean(LTRsimilarity,na.rm=T),youngest.member = max(LTRsimilarity,na.rm=T),unique = sum(unique)))
+nr.ltr.fam$prop.unique <- nr.ltr.fam$unique / nr.ltr.fam$fam.size
+```
+
+```{r}
+big.nr.ltr.fam <- subset(nr.ltr.fam,nr.ltr.fam$fam.size >= 20)
+big.nr.ltr.fam$family <- factor(big.nr.ltr.fam$family,levels=big.nr.ltr.fam[order(big.nr.ltr.fam$prop.unique,decreasing = T),"family"])
+
+big.nr.ltr.fam.plot <- melt(big.nr.ltr.fam,id.vars=c("family","prop.unique"))
+
+ggplot() + geom_point(aes(y=prop.unique,x=family,color=mean.age),data=subset(big.nr.ltr.fam,!is.na(big.nr.ltr.fam$mean.age)))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+ggplot() + geom_point(aes(y=prop.unique,x=family,color=youngest.member),data=subset(big.nr.ltr.fam,is.finite(big.nr.ltr.fam$youngest.member)))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) 
+ggplot() + geom_point(aes(y=prop.unique,x=family,color=value),data=subset(big.nr.ltr.fam.plot,big.nr.ltr.fam.plot$variable == "youngest.member" | big.nr.ltr.fam.plot$variable == "mean.age"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(variable~.)
+ggplot() + geom_point(aes(y=value,x=family,color=value),data=subset(big.nr.ltr.fam.plot,big.nr.ltr.fam.plot$variable == "youngest.member" | big.nr.ltr.fam.plot$variable == "mean.age"))  + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(variable~.)
+```
+
+
+```{r}
+look.at.families <- function(fam.list){
+nr.of.interest <- subset(nr.resolved,nr.resolved$family %in% fam.list)
+foi.summary <- data.frame(nr.of.interest %>% group_by(family,present.genos) %>% dplyr::summarize(B = sum(B73 == "present"),W = sum(W22 == "present"),P = sum(PH207 == "present"),M = sum(Mo17 == "present")))
+
+foi.summary2 <- melt(foi.summary,id.vars=c("family","present.genos"))
+foi.summary2$present.genos <- factor(foi.summary$present.genos,levels=c(1,2,3,4))
+foi.summary2$family <- factor(foi.summary2$family)
+p <- ggplot() + geom_bar(aes(y=value,x=variable,fill=present.genos),data=foi.summary2,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_wrap(.~family,scales="free")  + scale_fill_brewer()
+return(p)
+}
+look.at.families.tall <- function(fam.list){
+nr.of.interest <- subset(nr.resolved,nr.resolved$family %in% fam.list)
+foi.summary <- data.frame(nr.of.interest %>% group_by(family,present.genos) %>% dplyr::summarize(B = sum(B73 == "present"),W = sum(W22 == "present"),P = sum(PH207 == "present"),M = sum(Mo17 == "present")))
+
+foi.summary2 <- melt(foi.summary,id.vars=c("family","present.genos"))
+foi.summary2$present.genos <- factor(foi.summary$present.genos,levels=c(1,2,3,4))
+foi.summary2$family <- factor(foi.summary2$family)
+p <- ggplot() + geom_bar(aes(y=value,x=variable,fill=present.genos),data=foi.summary2,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(family~.,scales="free")  + scale_fill_manual(values=c("brown1","brown4","deepskyblue","darkblue"))
+return(p)
+}
+look.at.families2 <- function(fam.list){
+nr.of.interest <- subset(nr.resolved.ltr,nr.resolved.ltr$family %in% fam.list)
+nr.of.interest$present.genos2 <- rowSums(nr.of.interest[,c("B73","W22")] == "present")
+nr.of.interest2 <- subset(nr.of.interest,nr.of.interest$present.genos2 > 0)
+foi.summary <- data.frame(nr.of.interest2 %>% group_by(family,present.genos2) %>% dplyr::summarize(b.count = sum(B73 == "present"),w.count = sum(W22 == "present")))
+
+foi.summary2 <- melt(foi.summary,id.vars=c("family","present.genos2"))
+foi.summary2$present.genos2 <- factor(foi.summary$present.genos2,levels=c(1,2))
+p <- ggplot() + geom_bar(aes(y=value,x=variable,fill=present.genos2),data=foi.summary2,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(.~family)
+return(p)
+}
+
+look.at.annotated.families <- function(fam.list){
+  nr.of.interest <- subset(nr.resolved,nr.resolved$family %in% fam.list)
+
+  foi.summary <- data.frame(nr.of.interest %>% group_by(family,present.genos) %>% dplyr::summarize(b.count = sum(B73 == "present"),w.count = sum(W22 == "present"),ph.count = sum(PH207 == "present"),mo.count = sum(Mo17 == "present")))
+  
+  foi.summary2 <- melt(foi.summary,id.vars=c("family","present.genos"))
+  foi.summary2$group <- "nr.set"
+  find.order <- fam.size.all[fam.size.all$fam %in% fam.list,]
+  foi.summary2$family <- factor(foi.summary2$family,levels=paste(find.order[order(rowSums(find.order[,2:5])),"fam"]))
+  
+  fams.of.interest <- subset(fam.size.all,fam.size.all$fam %in% fam.list)
+  names(fams.of.interest)[1:5] <- c("family","b.count","w.count","ph.count","mo.count")
+  fam.summary <- melt(fams.of.interest[,1:5],id.vars="family")
+  fam.summary$present.genos <- 5
+  fam.summary$group <- "annotated"
+
+  foi.summary3 <- rbind(foi.summary2,fam.summary[,names(foi.summary2)])
+  foi.summary3$group <- factor(foi.summary3$group,levels=c("nr.set","annotated"))
+  foi.summary3$variable2 <- factor(substr(foi.summary3$variable,0,1),levels=c("b","w","m","p"))
+  foi.summary3$present.genos <- factor(foi.summary3$present.genos,levels=c(1,2,3,4,5))
+  
+  p <- ggplot() + geom_bar(aes(y=value,x=variable2,fill=present.genos),data=foi.summary3,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(group~family,scales = "free_y")  + scale_fill_brewer()
+  return(p)
+}
+```
+
+```{r}
+summarize.nr.fam <- data.frame(nr.resolved %>% group_by(family) %>% dplyr::summarize(one.geno = sum(present.genos == 1),two.geno = sum(present.genos == 2),three.geno = sum(present.genos == 3),four.geno = sum(present.genos == 4)))
+
+geno.unique <- subset(summarize.nr.fam,rowSums(summarize.nr.fam[,3:5]) == 0 & summarize.nr.fam$family %in% paste(subset(fam.size.all,rowSums(fam.size.all[,2:5]==0)==3)[,"fam"]))
+table(geno.unique$one.geno)
+unique.to.one <- data.frame(table(geno.unique$one.geno))
+```
+
+
+```{r}
+four.unique <- subset(geno.unique,geno.unique$one.geno > 3)
+
+for(i in 1:nrow(four.unique)){
+  tmp <- subset(fam.size.all,fam.size.all$fam == four.unique[i,"family"])
+  four.unique[i,"present.geno"] <- names(tmp[,2:5])[tmp[,2:5] > 0]
+  four.unique[i,"annotated.members"] <- tmp[1,2:5][tmp[,2:5]>0]
+}
+
+table(four.unique$present.geno)
+table(substr(four.unique$family,0,3))
+```
+
+
+```{r}
+four.unique.B.LTR <- B73.attributes[B73.attributes$fam %in% subset(four.unique,four.unique$present.geno == "annotated.in.B73" & grepl("RL",four.unique$family))[,"family"],]
+four.unique.W.LTR <- W22.attributes[W22.attributes$fam %in% subset(four.unique,four.unique$present.geno == "annotated.in.W22" & grepl("RL",four.unique$family))[,"family"],]
+four.unique.P.LTR <- PH207.attributes[PH207.attributes$fam %in% subset(four.unique,four.unique$present.geno == "annotated.in.PH207" & grepl("RL",four.unique$family))[,"family"],]
+four.unique.M.LTR <- Mo17.attributes[Mo17.attributes$fam %in% subset(four.unique,four.unique$present.geno == "annotated.in.Mo17" & grepl("RL",four.unique$family))[,"family"],]
+
+age.unique <- rbind(four.unique.B.LTR,four.unique.W.LTR,four.unique.P.LTR,four.unique.M.LTR)
+age.unique$genotype.present <- c(rep("B73",nrow(four.unique.B.LTR)),rep("W22",nrow(four.unique.W.LTR)),rep("PH207",nrow(four.unique.P.LTR)),rep("Mo17",nrow(four.unique.M.LTR)))
+ggplot(age.unique,aes(x=fam,y=LTRsimilarity,fill=genotype.present)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + stat_summary(fun.data = give.n, geom = "text") + facet_grid(.~genotype.present,scales="free")
+```
+
+```{r}
+summarize.nr.famsize <- data.frame(nr.resolved %>% group_by(family) %>% dplyr::summarize(B73.resolved = sum(B73 == "present"),W22.resolved = sum(W22 == "present"),Mo17.resolved = sum(Mo17 == "present"),PH207.resolved = sum(PH207 == "present")))
+```
+
+There are fewer "resolved" TEs than annotated in each genome. How closely related are these values?
+```{r}
+comp.resolved.annotated <- merge(fam.size.all[,1:5],summarize.nr.famsize,by.x="fam",by.y="family",all=T)
+comp.resolved.annotated[is.na(comp.resolved.annotated)] <- 0
+
+tmp.b <- comp.resolved.annotated[,c(1,2,6)]
+tmp.w <- comp.resolved.annotated[,c(1,3,7)]
+tmp.m <- comp.resolved.annotated[,c(1,5,8)]
+tmp.p <- comp.resolved.annotated[,c(1,4,9)]
+
+names(tmp.b) <- names(tmp.w) <- names(tmp.m) <- names(tmp.p) <- c("family","annotated","resolved")
+
+families.allgenos <- rbind(tmp.b,tmp.w,tmp.m,tmp.p)
+families.allgenos$genotype <- rep(c("B73","W22","Mo17","PH207"),each=nrow(tmp.b))
+families.allgenos$order <- substr(families.allgenos$family,0,2)
+
+a <- ggplot(subset(families.allgenos,rowSums(families.allgenos[,2:3]) > 10 & families.allgenos$order == "RL"),aes(x=annotated,y=resolved,color=genotype)) + geom_point() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(order~genotype) + geom_abline(intercept = 0, slope = 1)
+b <- ggplot(subset(families.allgenos,rowSums(families.allgenos[,2:3]) > 10 & families.allgenos$order == "DT"),aes(x=annotated,y=resolved,color=genotype)) + geom_point() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(order~genotype) + geom_abline(intercept = 0, slope = 1)
+c <- ggplot(subset(families.allgenos,rowSums(families.allgenos[,2:3]) > 10 & families.allgenos$order == "DH"),aes(x=annotated,y=resolved,color=genotype)) + geom_point() + theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(order~genotype) + geom_abline(intercept = 0, slope = 1)
+
+grid.arrange(a,b,c)
+```
+
+
+
+
+
+```{r}
+b73.te.gene$distance.nearest.gene <- b73.te.gene$V11
+b73.te.gene.intersect2 <- subset(b73.te.gene.intersect,!b73.te.gene.intersect$overlap.category == "no.overlap")
+b73.te.gene.intersect2$distance.nearest.gene <- 0
+```
+
+
+```{r}
+b73.allTE.gene <- read.table("intersect_TE_to_gene_B73_28Dec18.txt",header=F,stringsAsFactors = F)
+```
+
+```{r}
+b73.allTE.gene$gene <- substr(b73.allTE.gene$V10,9,22)
+b73.allTE.gene$TE <- substr(b73.allTE.gene$V5,4,24)
+b73.allTE.gene$TE.overlap <- b73.allTE.gene$V11 > 0
+b73.allTE.gene$anchor.gene.W22 <- ifelse(b73.allTE.gene$gene %in% gene_key_bw$b.gene,"anchor","not.anchored")
+b73.allTE.gene$anchor.gene.PH207 <- ifelse(b73.allTE.gene$gene %in% gene_key_bph$b.gene,"anchor","not.anchored")
+b73.allTE.gene$anchor.gene.Mo17 <- ifelse(b73.allTE.gene$gene %in% gene_key_bm$b.gene,"anchor","not.anchored")
+b73.allTE.gene$syntenic.gene <- ifelse(b73.allTE.gene$gene %in% syntenic.B73,"syntenic.gene","non.syntenic")
+b73.allTE.gene$overlap.category <- ifelse(b73.allTE.gene$V2 > b73.allTE.gene$V7 & b73.allTE.gene$V3 < b73.allTE.gene$V8,"TE.in.gene",
+                                       ifelse(b73.allTE.gene$V2 < b73.allTE.gene$V7 & b73.allTE.gene$V3 > b73.allTE.gene$V8, "gene.in.TE",
+                                              ifelse(b73.allTE.gene$V11 > 0, "gene.TE.overlap","no.overlap")))
+b73.allTE.gene$order <- ifelse(is.na(b73.allTE.gene$TE),NA,ifelse(grepl("DH",b73.allTE.gene$TE),"Helitron",ifelse(grepl("RL",b73.allTE.gene$TE),"LTR",ifelse(grepl("DT",b73.allTE.gene$TE),"TIR","LINES.SINES"))))
+
+
+b73.allTE.gene$nonshared.order.btow <- ifelse(b73.allTE.gene$TE %in% subset(btoall2,grepl("non.shared",btoall2$combo.class.btow))[,"B73.TE"],b73.allTE.gene$order,"sharedTE")
+b73.allTE.gene$nonshared.order.btom <- ifelse(b73.allTE.gene$TE %in% subset(btoall2,grepl("non.shared",btoall2$combo.class.btom))[,"B73.TE"],b73.allTE.gene$order,"sharedTE")
+b73.allTE.gene$nonshared.order.btoph <- ifelse(b73.allTE.gene$TE %in% subset(btoall2,grepl("non.shared",btoall2$combo.class.btoph))[,"B73.TE"],b73.allTE.gene$order,"sharedTE")
+```
+
+```{r}
+b73.allTE.geneinTE <- subset(b73.allTE.gene,b73.allTE.gene$overlap.category == "gene.in.TE")
+
+tmp1 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.W22","nonshared.order.btow")]))
+tmp2 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.W22","nonshared.order.btom")]))
+tmp3 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.W22","nonshared.order.btoph")]))
+
+tmp4 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.Mo17","nonshared.order.btow")]))
+tmp5 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.Mo17","nonshared.order.btom")]))
+tmp6 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.Mo17","nonshared.order.btoph")]))
+
+tmp7 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.PH207","nonshared.order.btow")]))
+tmp8 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.PH207","nonshared.order.btom")]))
+tmp9 <- data.frame(table(b73.allTE.geneinTE[,c("anchor.gene.PH207","nonshared.order.btoph")]))
+
+names(tmp1) <- names(tmp2) <- names(tmp3) <- names(tmp4) <- names(tmp5) <- names(tmp6) <- names(tmp7) <- names(tmp8) <- names(tmp9) <- c("anchor.gene","nonshared.order","Freq")
+
+geneinTE.plot <- rbind(tmp1,tmp2,tmp3,tmp4,tmp5,tmp6,tmp7,tmp8,tmp9)
+geneinTE.plot$anchor.genome <- factor(c(rep("W22",30),rep("Mo17",30),rep("PH207",30)),levels=c("W22","Mo17","PH207"))
+geneinTE.plot$contrast <- factor(rep(c("btow","btom","btoph"),each=10,times=3),levels=c("btow","btom","btoph"))
+
+geneinTE.plot$nonshared.order <- factor(geneinTE.plot$nonshared.order,levels=c("LTR","TIR","Helitron","LINES.SINES","sharedTE"))
+
+
+ggplot() + geom_bar(aes(y=Freq,x=anchor.gene,fill=nonshared.order),data=geneinTE.plot,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + facet_grid(anchor.genome~contrast,scales = "free") + scale_fill_brewer(palette="Accent")
+```
+
+Create a table where each gene is only counted once and only the shortest (inner-most) TE is counted as containing the gene
+```{r}
+unique.geneinTE <- unique(b73.allTE.geneinTE$gene)
+non.redundant.geneinTE <- data.frame(matrix(NA,nrow=length(unique.geneinTE),ncol=ncol(b73.allTE.geneinTE)))
+names(non.redundant.geneinTE) <- names(b73.allTE.geneinTE)
+for(i in 1:length(unique.geneinTE)){
+  tmp <- subset(b73.allTE.geneinTE,b73.allTE.geneinTE$gene == unique.geneinTE[i])
+  tmp$TElen <- tmp$V3-tmp$V2
+  non.redundant.geneinTE[i,] <- tmp[tmp$TElen == min(tmp$TElen),1:ncol(non.redundant.geneinTE)]
+}
+```
+
+```{r}
+non.redundant.geneinTE$not.anchored.any.contrast <- ifelse(rowSums(non.redundant.geneinTE == "not.anchored") > 0, "not.always.anchor","always.anchor")
+non.redundant.geneinTE$nonshared.any.order <- ifelse(rowSums(non.redundant.geneinTE == "sharedTE") == 3, "always.shared",non.redundant.geneinTE$order)
+
+plot.reduced.any <- data.frame(table(non.redundant.geneinTE[,c("not.anchored.any.contrast","nonshared.any.order")]))
+
+plot.reduced.any$nonshared.any.order <- factor(plot.reduced.any$nonshared.any.order,levels=c("LTR","TIR","Helitron","LINES.SINES","always.shared"))
+
+ggplot() + geom_bar(aes(y=Freq,x=not.anchored.any.contrast,fill=nonshared.any.order),data=plot.reduced.any,stat="identity",color="black") +  theme_minimal() + theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + scale_fill_brewer(palette="Accent") 
+```
+
+
+
+```{r}
+btoall2$chr <- igv.chr(btoall2$B73.coordinates)
+btoall2$bin <- floor(igv.start(btoall2$B73.coordinates)/1e6)*1e6
+btoall2$order <- substr(btoall2$B73.TE,0,2)
+```
+
+```{r}
+btoall3 <- btoall2
+btoall3$W22 <- ifelse(grepl("non.shared",btoall3$combo.class.btow),"absent",ifelse(grepl("unresolved",btoall3$combo.class.btow),"unresolved","present"))
+btoall3$Mo17 <- ifelse(grepl("non.shared",btoall3$combo.class.btom),"absent",ifelse(grepl("unresolved",btoall3$combo.class.btom),"unresolved","present"))
+btoall3$PH207 <- ifelse(grepl("non.shared",btoall3$combo.class.btoph),"absent",ifelse(grepl("unresolved",btoall3$combo.class.btoph),"unresolved","present"))
+btoall3$start <- igv.start(btoall3$B73.coordinates)
+```
+
+```{r}
+btoall.bins <- data.frame(btoall3 %>% group_by(bin,chr) %>% dplyr::summarize(
+  TEs = n(),
+  variable.LTR = sum(absent.genos > 0 & order == "RL"),
+  variable.TIR = sum(absent.genos > 0 & order == "DT"),
+  variable.Helitron = sum(absent.genos > 0 & order == "DH"),
+  shared.W22 = sum(W22 == "present") / sum(W22 == "present" | W22 == "absent"),
+  shared.Mo17 = sum(Mo17 == "present") / sum(Mo17 == "present" | Mo17 == "absent"),
+  shared.PH207 = sum(PH207 == "present") / sum(PH207 == "present" | PH207 == "absent")
+  ))
+```
+
+Make a way to plot all chromosomes and add in whatever TE families to plot 
+```{r}
+tmp <- subset(btoall3,btoall3$B73.TE %in% subset(non.redundant.geneinTE,non.redundant.geneinTE$nonshared.any.order != "always.shared")[,"TE"])
+tmp$start <- igv.start(tmp$B73.coordinates)
+
+ggplot(data = tmp,aes(x=start,y=1,group=order,color = order)) + geom_jitter(stat="identity",size=0.6,shape=25) + theme_minimal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + facet_grid(chr~.,scales="free") 
+```
+
+```{r}
+look.at.insertions <- function(fam.list){
+tmp <- subset(nr.resolved,nr.resolved$family %in% fam.list)
+tmp2 <- melt(tmp[,c("TE","present.genos","B73.coordinates","W22.coordinates","Mo17.coordinates","PH207.coordinates")],id.vars = c("TE","present.genos"))
+tmp3 <- subset(tmp2,!is.na(tmp2$value))
+tmp3$chr <- igv.chr(paste(tmp3$value))
+tmp3$start <- igv.start(paste(tmp3$value))
+tmp3$fam <- substr(tmp3$TE,0,8)
+tmp3$present.genos <- factor(tmp3$present.genos,levels=c(1:4))
+tmp3$variable <- factor(tmp3$variable,levels=rev(c("B73.coordinates","W22.coordinates","PH207.coordinates","Mo17.coordinates")))
+
+plot.2 <- ggplot(data = tmp3,aes(x=start,y=variable,group=variable,color = present.genos))  + theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  + geom_point(stat="identity",shape = 124) + scale_color_manual(values=c("brown1","brown4","deepskyblue","darkblue")) + facet_grid(fam~chr,scales="free_x")
+return(plot.2)
+}
+look.at.insertions2 <- function(fam.list){
+tmp <- subset(nr.resolved,nr.resolved$family %in% fam.list)
+tmp2 <- melt(tmp[,c("TE","present.genos","B73.coordinates","W22.coordinates","Mo17.coordinates","PH207.coordinates")],id.vars = c("TE","present.genos"))
+tmp3 <- subset(tmp2,!is.na(tmp2$value))
+tmp3$chr <- igv.chr(paste(tmp3$value))
+tmp3$start <- igv.start(paste(tmp3$value))
+tmp3$fam <- substr(tmp3$TE,0,8)
+tmp3$present.genos <- factor(tmp3$present.genos,levels=c(1:4))
+tmp3$variable <- factor(tmp3$variable,levels=rev(c("B73.coordinates","W22.coordinates","PH207.coordinates","Mo17.coordinates")))
+
+plot.2 <- ggplot(data = tmp3,aes(x=start,y=variable,group=variable,color = present.genos))  + theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  + geom_point(stat="identity",shape = 15) + scale_color_manual(values=c("brown1","brown4","deepskyblue","darkblue")) + facet_grid(fam~chr,scales="free_x")
+return(plot.2)
+}
+```
+
+
+
+
+```{r}
+cherry.pick <- c("RLC36113","RLC00045","RLG00542","RLG25029","DTA00192","DTH00437","DTH14236","DTX10267")
+melt.nr[melt.nr$family %in% cherry.pick,]
+plot.1 <- look.at.families.tall(cherry.pick)
+plot.2 <- look.at.insertions(cherry.pick)
+plot.3 <- look.at.insertions2(cherry.pick)
+grid.arrange(plot.1,plot.2,nrow=1,widths=c(1,2))
+```
+
+
+
+Redo gene expression with Walley data
+```{r}
+walley.gene.exp <- read.table("walley_fpkm_maizeGDB_20-Jun-2018.txt",header=T,stringsAsFactors = F,sep="\t")
+```
+
+```{r}
+walley.gene.exp$expressed.tissues <- rowSums(walley.gene.exp[,2:24] >= 1,na.rm = T)
+walley.gene.exp$max.expression <- rowMaxs(as.matrix(walley.gene.exp[,2:24]),na.rm=T)
+walley.gene.exp$max.expression[!is.finite(walley.gene.exp$max.expression)] <- 0
+non.redundant.geneinTE$variableTE <- ifelse(non.redundant.geneinTE$nonshared.any.order == "sharedTE","sharedTE","variableTE")
+walley.gene.exp$category <- ifelse(walley.gene.exp$geneID %in% syntenic.B73,"syntenic",ifelse(walley.gene.exp$geneID %in% non.redundant.geneinTE[non.redundant.geneinTE$variableTE == "variableTE","gene"],"in.variable.TE",ifelse(walley.gene.exp$geneID %in% non.redundant.geneinTE[non.redundant.geneinTE$variableTE == "sharedTE","gene"],"in.shared.TE","non.syntenic")))
+```
+
+```{r}
+walley.gene.exp2 <- subset(walley.gene.exp,walley.gene.exp$category != "non.syntenic")
+walley.gene.exp2$category <- factor(walley.gene.exp2$category,levels=c("syntenic","in.variable.TE"))
+a <- ggplot(walley.gene.exp2,aes(x=expressed.tissues,fill=category)) + geom_histogram(position = "identity",binwidth = 1,color="black") + facet_grid(category~.,scales="free")+ theme_minimal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + scale_fill_brewer(palette="Accent") 
+b <- ggplot(walley.gene.exp2,aes(x=category,y=log2(1+max.expression),fill=category)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + scale_fill_brewer(palette="Accent") + stat_summary(fun.y=median, geom="point", size=2,color="white")
+grid.arrange(a,b,ncol=1)
+```
+
+
+```{r}
+a <- ggplot(walley.gene.exp,aes(x=expressed.tissues,fill=category)) + geom_histogram(position = "identity",binwidth = 1,color="black") + facet_grid(category~.,scales="free")+ theme_minimal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + scale_fill_brewer(palette="Dark2") 
+b <- ggplot(walley.gene.exp,aes(x=category,y=log2(1+max.expression),fill=category)) + geom_violin() + theme_minimal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + scale_fill_brewer(palette="Dark2")+ stat_summary(fun.y=median, geom="point", size=2,color="white") 
+grid.arrange(a,b,ncol=2)
+```
+
+
+
+
+
+
+
+
+
